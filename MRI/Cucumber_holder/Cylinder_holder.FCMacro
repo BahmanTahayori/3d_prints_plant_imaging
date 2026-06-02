@@ -1,0 +1,293 @@
+"""
+Parametric two-story vial holder for FreeCAD
+
+How to use:
+1) Open FreeCAD.
+2) Open the Macro editor or run this Python file from the Python console.
+3) Edit the parameters in the USER PARAMETERS section.
+4) Run the script. A new document will be created with the holder.
+
+Notes:
+- This script builds a 3 x 2 holder (3 columns, 2 rows).
+- The holder has top and bottom support plates ("two-story") with aligned holes.
+- Overall length, width, height, and vial diameter are all parametric.
+- If the chosen dimensions are too small for the vial diameter / margins, the script raises an error.
+"""
+
+import FreeCAD as App
+import Part
+from FreeCAD import Vector
+
+# ============================================================
+# USER PARAMETERS  (edit these first)
+# ============================================================
+DOC_NAME = "ParametricVialHolder"
+
+# Grid
+COLUMNS = 3
+ROWS = 2
+
+# Vial / hole geometry (mm)
+VIAL_DIAMETER = 18.0          # nominal vial diameter
+HOLE_CLEARANCE = 0.60         # extra clearance added to the vial diameter
+
+# Overall holder size (mm)
+HOLDER_LENGTH = 95.0          # X direction
+HOLDER_WIDTH = 65.0           # Y direction
+HOLDER_HEIGHT = 42.0          # Z direction
+
+# Structural parameters (mm)
+WALL_THICKNESS = 3.0
+TOP_PLATE_THICKNESS = 4.0
+BOTTOM_PLATE_THICKNESS = 4.0
+
+# Margins / spacing (mm)
+EDGE_MARGIN_X = 6.0           # material between hole edge and outer edge in X
+EDGE_MARGIN_Y = 6.0           # material between hole edge and outer edge in Y
+MIN_WEB_X = 4.0               # minimum material between adjacent holes in X
+MIN_WEB_Y = 4.0               # minimum material between adjacent holes in Y
+
+# Side window settings (mm)
+MAKE_SIDE_WINDOWS = True
+WINDOW_SIDE_MARGIN_X = 8.0    # front/back window inset from left/right ends
+WINDOW_SIDE_MARGIN_Y = 8.0    # left/right window inset from front/back ends
+WINDOW_VERTICAL_MARGIN = 4.0  # clearance from the top/bottom plates to the side windows
+
+# Cosmetic parameters (optional)
+CORNER_RADIUS = 0.0           # set >0 if you want to try filleting outer vertical edges
+
+# ============================================================
+# INTERNALS
+# ============================================================
+EPS = 0.01
+HOLE_DIAMETER = VIAL_DIAMETER + HOLE_CLEARANCE
+HOLE_RADIUS = HOLE_DIAMETER / 2.0
+INNER_HEIGHT = HOLDER_HEIGHT - TOP_PLATE_THICKNESS - BOTTOM_PLATE_THICKNESS
+
+
+def validate_parameters():
+    if COLUMNS < 1 or ROWS < 1:
+        raise ValueError("COLUMNS and ROWS must both be >= 1.")
+
+    if HOLDER_LENGTH <= 0 or HOLDER_WIDTH <= 0 or HOLDER_HEIGHT <= 0:
+        raise ValueError("HOLDER_LENGTH, HOLDER_WIDTH, and HOLDER_HEIGHT must be > 0.")
+
+    if WALL_THICKNESS <= 0 or TOP_PLATE_THICKNESS <= 0 or BOTTOM_PLATE_THICKNESS <= 0:
+        raise ValueError("Wall and plate thicknesses must be > 0.")
+
+    if INNER_HEIGHT <= 0:
+        raise ValueError("HOLDER_HEIGHT is too small for the selected plate thicknesses.")
+
+    if HOLDER_LENGTH <= 2 * WALL_THICKNESS or HOLDER_WIDTH <= 2 * WALL_THICKNESS:
+        raise ValueError("Holder length/width too small for the selected wall thickness.")
+
+    # Compute auto-fit pitch and ensure enough space exists.
+    pitch_x, pitch_y, _, _ = compute_grid_layout(check_only=True)
+
+    if COLUMNS > 1 and pitch_x < HOLE_DIAMETER + MIN_WEB_X:
+        raise ValueError(
+            "HOLDER_LENGTH is too small for 3 columns with the current vial diameter, margins, and MIN_WEB_X."
+        )
+
+    if ROWS > 1 and pitch_y < HOLE_DIAMETER + MIN_WEB_Y:
+        raise ValueError(
+            "HOLDER_WIDTH is too small for 2 rows with the current vial diameter, margins, and MIN_WEB_Y."
+        )
+
+    if (2 * (EDGE_MARGIN_X + HOLE_RADIUS)) > HOLDER_LENGTH:
+        raise ValueError("HOLDER_LENGTH is too small for the selected EDGE_MARGIN_X and vial diameter.")
+
+    if (2 * (EDGE_MARGIN_Y + HOLE_RADIUS)) > HOLDER_WIDTH:
+        raise ValueError("HOLDER_WIDTH is too small for the selected EDGE_MARGIN_Y and vial diameter.")
+
+
+def compute_grid_layout(check_only=False):
+    """
+    Returns:
+        pitch_x, pitch_y, x_centers, y_centers
+    Hole centers are automatically distributed within the overall holder size.
+    The driving dimensions are HOLDER_LENGTH and HOLDER_WIDTH.
+    """
+    if COLUMNS == 1:
+        x_centers = [HOLDER_LENGTH / 2.0]
+        pitch_x = 0.0
+    else:
+        left_center_x = EDGE_MARGIN_X + HOLE_RADIUS
+        right_center_x = HOLDER_LENGTH - EDGE_MARGIN_X - HOLE_RADIUS
+        pitch_x = (right_center_x - left_center_x) / (COLUMNS - 1)
+        x_centers = [left_center_x + i * pitch_x for i in range(COLUMNS)]
+
+    if ROWS == 1:
+        y_centers = [HOLDER_WIDTH / 2.0]
+        pitch_y = 0.0
+    else:
+        front_center_y = EDGE_MARGIN_Y + HOLE_RADIUS
+        back_center_y = HOLDER_WIDTH - EDGE_MARGIN_Y - HOLE_RADIUS
+        pitch_y = (back_center_y - front_center_y) / (ROWS - 1)
+        y_centers = [front_center_y + j * pitch_y for j in range(ROWS)]
+
+    if check_only:
+        return pitch_x, pitch_y, None, None
+    return pitch_x, pitch_y, x_centers, y_centers
+
+
+def make_outer_shell():
+    outer = Part.makeBox(HOLDER_LENGTH, HOLDER_WIDTH, HOLDER_HEIGHT)
+
+    inner = Part.makeBox(
+        HOLDER_LENGTH - 2.0 * WALL_THICKNESS,
+        HOLDER_WIDTH - 2.0 * WALL_THICKNESS,
+        HOLDER_HEIGHT - TOP_PLATE_THICKNESS - BOTTOM_PLATE_THICKNESS,
+        Vector(WALL_THICKNESS, WALL_THICKNESS, BOTTOM_PLATE_THICKNESS),
+    )
+
+    shell = outer.cut(inner)
+
+    if CORNER_RADIUS > 0:
+        # Try to fillet only the 4 outer vertical edges.
+        vertical_edges = []
+        for edge in shell.Edges:
+            v1 = edge.Vertexes[0].Point
+            v2 = edge.Vertexes[1].Point
+            if abs(v1.x - v2.x) < 1e-6 and abs(v1.y - v2.y) < 1e-6 and abs(v1.z - v2.z) > 1e-6:
+                # Edge is vertical. Keep only outer-corner edges.
+                if (
+                    (abs(v1.x - 0.0) < 1e-6 or abs(v1.x - HOLDER_LENGTH) < 1e-6)
+                    and (abs(v1.y - 0.0) < 1e-6 or abs(v1.y - HOLDER_WIDTH) < 1e-6)
+                ):
+                    vertical_edges.append(edge)
+        if vertical_edges:
+            try:
+                shell = shell.makeFillet(CORNER_RADIUS, vertical_edges)
+            except Exception:
+                # If filleting fails, continue with the sharp-corner version.
+                pass
+
+    return shell
+
+
+def make_hole_cutters(x_centers, y_centers):
+    cutters = []
+
+    # Bottom plate holes
+    for x in x_centers:
+        for y in y_centers:
+            cyl_bottom = Part.makeCylinder(
+                HOLE_RADIUS,
+                BOTTOM_PLATE_THICKNESS + 2 * EPS,
+                Vector(x, y, -EPS),
+                Vector(0, 0, 1),
+            )
+            cutters.append(cyl_bottom)
+
+    # Top plate holes
+    z_top_start = HOLDER_HEIGHT - TOP_PLATE_THICKNESS - EPS
+    for x in x_centers:
+        for y in y_centers:
+            cyl_top = Part.makeCylinder(
+                HOLE_RADIUS,
+                TOP_PLATE_THICKNESS + 2 * EPS,
+                Vector(x, y, z_top_start),
+                Vector(0, 0, 1),
+            )
+            cutters.append(cyl_top)
+
+    return cutters
+
+
+def make_side_window_cutters():
+    cutters = []
+
+    if not MAKE_SIDE_WINDOWS:
+        return cutters
+
+    window_z = BOTTOM_PLATE_THICKNESS + WINDOW_VERTICAL_MARGIN
+    window_h = HOLDER_HEIGHT - TOP_PLATE_THICKNESS - BOTTOM_PLATE_THICKNESS - 2.0 * WINDOW_VERTICAL_MARGIN
+
+    if window_h <= 0:
+        return cutters
+
+    # Front / back windows (cut through Y walls)
+    front_back_window_length = HOLDER_LENGTH - 2.0 * WINDOW_SIDE_MARGIN_X
+    if front_back_window_length > 0:
+        front_window = Part.makeBox(
+            front_back_window_length,
+            WALL_THICKNESS + 2 * EPS,
+            window_h,
+            Vector(WINDOW_SIDE_MARGIN_X, -EPS, window_z),
+        )
+        back_window = Part.makeBox(
+            front_back_window_length,
+            WALL_THICKNESS + 2 * EPS,
+            window_h,
+            Vector(WINDOW_SIDE_MARGIN_X, HOLDER_WIDTH - WALL_THICKNESS - EPS, window_z),
+        )
+        cutters.extend([front_window, back_window])
+
+    # Left / right windows (cut through X walls)
+    left_right_window_width = HOLDER_WIDTH - 2.0 * WINDOW_SIDE_MARGIN_Y
+    if left_right_window_width > 0:
+        left_window = Part.makeBox(
+            WALL_THICKNESS + 2 * EPS,
+            left_right_window_width,
+            window_h,
+            Vector(-EPS, WINDOW_SIDE_MARGIN_Y, window_z),
+        )
+        right_window = Part.makeBox(
+            WALL_THICKNESS + 2 * EPS,
+            left_right_window_width,
+            window_h,
+            Vector(HOLDER_LENGTH - WALL_THICKNESS - EPS, WINDOW_SIDE_MARGIN_Y, window_z),
+        )
+        cutters.extend([left_window, right_window])
+
+    return cutters
+
+
+def fuse_shapes(shapes):
+    if not shapes:
+        return None
+    result = shapes[0]
+    for shp in shapes[1:]:
+        result = result.fuse(shp)
+    return result
+
+
+def build_vial_holder():
+    validate_parameters()
+    _, _, x_centers, y_centers = compute_grid_layout()
+
+    shell = make_outer_shell()
+    hole_cutters = make_hole_cutters(x_centers, y_centers)
+    window_cutters = make_side_window_cutters()
+
+    all_cutters = hole_cutters + window_cutters
+    cutter_union = fuse_shapes(all_cutters)
+    final_shape = shell.cut(cutter_union) if cutter_union else shell
+
+    return final_shape
+
+
+def main():
+    doc = App.newDocument(DOC_NAME)
+    shape = build_vial_holder()
+
+    obj = doc.addObject("Part::Feature", "VialHolder")
+    obj.Shape = shape
+
+    doc.recompute()
+
+    try:
+        import FreeCADGui as Gui
+        Gui.ActiveDocument.ActiveView.fitAll()
+        Gui.SendMsgToActiveView("ViewFit")
+    except Exception:
+        pass
+
+    print("Done. Created parametric 3x2 two-story vial holder in document:", DOC_NAME)
+    print("Overall size (L x W x H): %.2f x %.2f x %.2f mm" % (HOLDER_LENGTH, HOLDER_WIDTH, HOLDER_HEIGHT))
+    print("Hole diameter: %.2f mm" % HOLE_DIAMETER)
+
+
+if __name__ == "__main__":
+    main()
