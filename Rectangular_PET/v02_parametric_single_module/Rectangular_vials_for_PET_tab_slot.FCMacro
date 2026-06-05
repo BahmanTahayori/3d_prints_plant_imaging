@@ -1,0 +1,2481 @@
+# -*- coding: utf-8 -*-
+"""
+Parametric FreeCAD model for a 4-plant rectangular PET-imaging plant container.
+
+Creates:
+  1) Main_Container: one-piece rectangular holder/tray with four top openings,
+     one perimeter wall, a closed bottom, internally connected lower wells, internal
+     alignment pins, and a hollow central irrigation/distribution column.
+  2) Single_Container: one removable insert container design that fits each opening.
+  3) Dish: top carrier plate with four basket windows/seats, matching pin holes,
+     and a central fill/access hole above the hollow column.
+  4) Basket: one removable plant basket design carried by the dish.
+
+Revision v20 — single-module default:
+  - Returns the default macro view to one modular Main_Container, one Dish, one
+    Single_Container_A1, and one Basket_A1.
+  - Preserves all v19 modular changes: no flat-wall centre slots, retained top
+    slots, and four edge-open dovetail slots on each side.
+  - No modular connector tabs or neighbouring modules are shown by default.
+  - The array-preview code remains available and can be re-enabled parametrically.
+
+Revision v19:
+  - Removes the horizontal connector slots from the flat side-wall centres.
+  - Adds edge-open dovetail slots next to the vertical corner edges: four per side
+    (two corner edges x two staggered height levels).
+  - Retains the top-inserted slots/tabs. No slots are added to the bottom.
+  - Connector tabs are shorter than their slots and include a smaller recessed
+    plier head for removal without creating an external bump.
+  - Removes the former blind top-bridge locking system; modular connection is now
+    provided only by recessed removable top tabs and edge-open connector tabs.
+  - Optional preview can generate a modular main-container array for checking
+    multi-module layouts and connector-tab positions.
+  - Single container, basket, dish openings, and existing mating rules are preserved.
+
+Revision v15:
+  - Dish handle tabs can be placed at both X ends of the dish.
+  - A1-A4 ID labels are engraved/recessed by default on the main-container,
+    dish, single-container, and basket top surfaces so stacked parts sit flat.
+  - Label scale defaults to 0.40 for all A1-A4 part labels.
+  - Nominal liquid capacities are calculated from the parametric dimensions,
+    and recessed 25 mL interval calibration bars plus numeric labels are added
+    to side walls where the requested volume level fits below the top exclusion zone.
+  - Volume bars/labels are intentionally omitted from the upper 20 mm by default.
+  - Default display is simplified: Main_Container, Dish, one Single_Container,
+    and one Basket only. The mating-dimensions note is disabled by default.
+  - P.main_height is now a minimum height when auto_expand_main_height_to_single=True;
+    the generated holder height expands automatically for tall single containers.
+  - single_body_length and single_body_width are now the master XY dimensions.
+  - Main-container XY size auto-fits both larger and smaller insert dimensions when
+    auto_fit_main_outer_xy_to_single=True.
+  - Basket lower body can now be derived from the single-container internal cavity,
+    while the basket upper lip remains intentionally larger so it can be carried by
+    the dish/rim.
+  - Uses the user-provided default parameters from 2026-06-03.
+  - Basket lower-body fit is now fully parametric: it can follow the global
+    fit_clearance_xy or use independent X/Y clearances, with no hard-coded
+    16.2 x 6.2 mm basket dimensions.
+  - Dish outer footprint can now auto-fit both smaller and larger part layouts;
+    when auto_fit_dish_outer_xy_to_layout=True, dish_outer_length/width are no
+    longer fixed minimums that prevent the dish from shrinking.
+  - Export settings now have safe defaults and maybe_export() uses getattr(),
+    so custom parameter blocks copied from older versions do not crash when
+    export_step/export_stl/export_dir are absent.
+
+How to use:
+  - Open FreeCAD.
+  - File -> New.
+  - Macro -> Macros... -> Create, paste/run this file; or run with FreeCADCmd.
+  - Change the parameters in class P below and re-run.
+
+Units: millimetres.
+"""
+
+import math
+import os
+
+import FreeCAD as App
+import Part
+
+try:
+    import FreeCADGui as Gui
+except Exception:  # FreeCADCmd/headless
+    Gui = None
+
+
+# -----------------------------------------------------------------------------
+# PARAMETERS — edit these in most cases
+# -----------------------------------------------------------------------------
+class P:
+    # General fabrication tolerances
+    fit_clearance_xy = 0.4       # one-side clearance for sliding fits, mm
+    z_clearance = 0.20            # vertical clearance between stacked parts, mm
+    fillet_radius = 0         # set 0 to disable simple all-edge fillets
+
+    # Main container / holder tray.
+    # Defaults approximate the uploaded main-container 3MF footprint: 120 x 60 x 56 mm.
+    # If auto_expand_main_height_to_single=True, effective_main_height() will expand
+    # upward when single_depth is larger than main_height so the insert does not
+    # protrude through the closed bottom.
+    main_outer_length = 120.0
+    main_outer_width = 60.0
+    main_height = 56.0
+    # True means main_outer_length/main_outer_width are only reference values;
+    # the generated main holder shrinks or grows from single_body_length/width.
+    # False keeps the old behaviour: these are minimum outer dimensions.
+    auto_fit_main_outer_xy_to_single = True
+    auto_expand_main_height_to_single = True
+    main_bottom_thickness = 2.0   # closed bottom; no cut reaches below this plane
+    main_min_wall_thickness = 3.5 # minimum outside perimeter wall; extra space stays as wall
+
+    # Four top openings. By default these are derived from the single-container body.
+    # With the defaults below, each opening is single_body + 2*fit_clearance_xy.
+    opening_gap_x = 15             # top bridge/rib between left/right openings
+    opening_gap_y = 15            # top bridge/rib between lower/upper openings
+
+    # Internally connect the four wells below the upper bridge/rib while preserving
+    # four separate top openings and a closed bottom.
+    connect_main_wells_internally = True
+    main_top_bridge_height = 4.0      # top divider material preserved from the top downward
+    main_connection_overlap = .70    # overlap into neighbouring wells for robust boolean cuts
+
+    # Single removable container body. Main opening = body + 2*fit_clearance_xy.
+    # If you want to use the earlier larger inserts, increase these two dimensions;
+    # the main tray will auto-expand only if needed for wall thickness and height.
+    # Stress-test defaults requested by user. Change these two values and the
+    # main openings, main outer XY, dish windows, basket body/lip, and dish size
+    # will all update from them.
+    single_body_length = 33.0
+    single_body_width = 23.0
+    single_depth = 160.0
+    single_wall = 1.50
+    single_bottom = 2.00
+    single_top_flange_overhang = 2.00
+    single_top_flange_thickness = 2.00
+    single_corner_fillet = 0.0
+
+    # Dish/top carrier plate
+    dish_outer_length = 124.0
+    dish_outer_width = 64.0
+    auto_expand_dish_to_main = True
+    # True means dish_outer_length/dish_outer_width are only manual fallback/reference
+    # values. The generated dish plate shrinks or grows from the main holder and
+    # basket-lip layout. False keeps the older behaviour where dish_outer_length/width
+    # act as minimum dimensions.
+    auto_fit_dish_outer_xy_to_layout = True
+    dish_outer_overhang = 2.0
+    dish_min_edge_margin = 2.0     # minimum dish material outside window/recess features, mm
+    dish_thickness = 2
+    dish_basket_lip_recess_depth = 0.45
+    dish_basket_lip_recess_clearance = 0.50
+    dish_central_fill_hole_diameter = 4.0  # gives top access to the hollow main-column bore
+
+    # Basket: lower body passes through dish window; top lip rests on dish and is carried by it.
+    # By default, basket footprint follows the single-container body, so one change
+    # updates the single insert, main opening, basket, and dish window together.
+    derive_basket_from_single = True
+    # True = basket lower body is derived from the SINGLE-CONTAINER INTERNAL CAVITY,
+    # so it can drop/sit into the single container. The basket upper lip remains
+    # intentionally larger via basket_lip_overhang_x/y.
+    # False = older behaviour, where basket lower body was derived from the
+    # single-container OUTER body using basket_body_length/width_allowance.
+    basket_lower_body_fits_inside_single = True
+    # Basket lower-body clearance is parametric.
+    # True: use the global sliding-fit clearance P.fit_clearance_xy for both X and Y.
+    # False: use the independent basket_to_single_inner_clearance_x/y values below.
+    basket_clearance_follows_fit_clearance = True
+    basket_to_single_inner_clearance_x = 0.40  # one-side clearance if basket_clearance_follows_fit_clearance=False
+    basket_to_single_inner_clearance_y = 0.40  # one-side clearance if basket_clearance_follows_fit_clearance=False
+    basket_min_body_dimension = 0.50
+    basket_body_length = 49.0      # used only if derive_basket_from_single=False
+    basket_body_width = 18.5       # used only if derive_basket_from_single=False
+    basket_body_length_allowance = 3.30  # effective basket length = single_body_length - this
+    basket_body_width_allowance = 1.80   # effective basket width  = single_body_width  - this
+    # Basket defaults are restored to the earlier shallow-basket design.
+    basket_depth = 12.0
+    auto_expand_basket_depth_to_bottom = False  # old basket behaviour; helpers still prevent invalid geometry
+    basket_min_open_depth = 2.0
+    basket_wall = 1.00
+    basket_bottom = 1.0
+    basket_lip_length = 56.0       # used only if derive_basket_from_single=False
+    basket_lip_width = 25.0        # used only if derive_basket_from_single=False
+    basket_lip_overhang_x = 2.   # each side; used when derive_basket_from_single=True
+    basket_lip_overhang_y = 2.   # each side; used when derive_basket_from_single=True
+    basket_lip_thickness = 1.0
+    basket_corner_fillet = 0.9
+
+    # Basket perforations/slots
+    basket_bottom_slot_length = 3.0
+    basket_bottom_slot_width = 2.0
+    basket_bottom_slot_pitch_x = 5.0
+    basket_bottom_slot_pitch_y = 4.0
+    basket_side_slot_length = .01
+    basket_side_slot_height = .01
+    basket_side_slot_pitch = 20.0
+    basket_side_slot_z = 3
+
+    # Alignment pins only. Pins are inside the main footprint, placed on solid
+    # perimeter/rib material outside the single-container openings. Matching holes
+    # are cut into the dish. No external main-container lugs are added.
+    enable_alignment_pins = True
+    alignment_pin_count = 2            # 2 = front/back internal pins; 4 also adds left/right internal pins
+    alignment_pin_diameter = 2.5
+    alignment_pin_height = 4
+    alignment_pin_hole_clearance = 0.35
+    alignment_pin_min_surround = 0.80  # minimum solid material around each pin within the perimeter strip
+
+    # Dish handle: tabs on the dish only. They are not part of the main box.
+    enable_dish_handle = True
+    dish_handle_both_ends = True
+    dish_handle_length = 20.0
+    dish_handle_width = 40.0
+    dish_handle_overlap = 1.0
+
+    # Parametric-box-style modular main-container connector system.
+    # All modules are identical/genderless. Curved dovetail slots are NARROW at
+    # the outside face and WIDER deeper in the wall. Separate double-sided tabs
+    # bridge two opposing slots. No connector feature is added to the bottom.
+    enable_modular_side_slots = True
+    modular_slot_sides = ("N", "S", "E", "W")
+    modular_slot_depth = 2.0             # blind depth into each outside wall
+    modular_slot_min_back_wall = 1.2     # sealed printable wall behind every slot
+    modular_key_clearance = 0.25         # width/height clearance between tab and slot
+    modular_fit_clearance_depth_per_side = 0.12
+    modular_module_gap = 1.0             # gap between adjacent modules; tab bridges it
+    modular_curve_steps = 11
+    modular_curve_power = 0.85
+    modular_boolean_eps = 0.10
+
+    # Vertical slots descending from the TOP edge of every side wall. These tabs
+    # are inserted vertically from above. Two slots per side avoid the existing
+    # central dish-alignment pins and provide stronger anti-separation locking.
+    enable_modular_top_vertical_slots = True
+    modular_top_slots_per_side = 2
+    modular_top_slot_offset_fraction = 0.26
+    modular_top_slot_face_width = 8.0
+    modular_top_slot_deep_width = 11.0
+    modular_top_slot_vertical_length = 24.0
+    modular_top_tab_length_clearance = 4.0
+    modular_top_tab_surface_recess = 0.8
+
+    # V18 flat-wall horizontal slots are disabled in v19. They were visually
+    # intrusive and are replaced by edge-open slots near the vertical corners.
+    enable_modular_side_horizontal_slots = False
+    modular_side_slot_face_height = 6.0       # legacy compatibility only
+    modular_side_slot_deep_height = 9.0       # legacy compatibility only
+    modular_side_slot_horizontal_length = 30.0  # legacy compatibility only
+    modular_side_slot_z_fraction = 0.64       # legacy compatibility only
+    modular_side_tab_length_clearance = 6.0   # legacy compatibility only
+
+    # Edge-open connector slots. Each side has four slots total:
+    # two vertical corner edges x two height levels. The slot opens to the corner
+    # edge, so the shorter connector tab can slide in from the edge and can later
+    # be gripped with pliers. North/south and east/west levels are staggered to
+    # prevent perpendicular connector tabs colliding at a shared module corner.
+    enable_modular_edge_slots = True
+    modular_edge_slots_per_vertical_edge = 2  # 2 per edge => 4 on each side
+    modular_edge_slot_z_fractions_ns = (0.30, 0.62)
+    modular_edge_slot_z_fractions_ew = (0.44, 0.76)
+    modular_edge_slot_insertion_length = 10.0  # distance from corner edge into side face
+    modular_edge_slot_face_height = 12.0       # narrow outside throat height
+    modular_edge_slot_deep_height = 16.0       # wider internal dovetail height
+    modular_edge_tab_length_clearance = 3.5    # unused edge space for plier access
+    modular_edge_tab_head_length = 2.0         # smaller grip within unused slot length
+    modular_edge_tab_head_height_fraction = 0.48
+
+    # Smaller-than-body recessed plier grip. The grip never extends above the top
+    # surface or outside the side envelope. It is intended for needle-nose pliers.
+    modular_tab_head_width_fraction = 0.48
+    modular_tab_head_length = 3.0
+    modular_tab_head_height = 2.0
+    modular_tab_head_gap_depth = 0.8
+    modular_tab_edge_fillet = 0.35
+
+    # Compatibility aliases used by the shared validation/wall-sizing code. The
+    # legacy shared validation uses these aliases; v19 geometry uses the detailed top/edge parameters above.
+    modular_slot_length_x = modular_side_slot_horizontal_length
+    modular_slot_length_y = modular_side_slot_horizontal_length
+    modular_slot_height = modular_side_slot_face_height
+    modular_slot_z_center = 18.0
+
+    # v17 blind top bridges/sockets are intentionally disabled.
+    enable_modular_top_locks = False
+    modular_lock_sides = ()
+    enable_modular_central_cross_lock = False
+
+    # Single-module display is the default. It shows one modular Main_Container,
+    # one Dish, one Single_Container_A1, and one Basket_A1. The main container still
+    # contains all top and vertical-edge modular slots. No neighbour modules or
+    # connector-tab sets are displayed unless the array preview is enabled below.
+    show_modular_array_preview = False
+
+    # Optional future array preview. Set show_modular_array_preview=True and change
+    # these counts when you want to inspect how several identical modules connect.
+    modular_array_count_x = 2
+    modular_array_count_y = 2
+    modular_preview_show_connector_keys = True
+    modular_preview_show_top_lock_bridges = False
+    modular_preview_show_central_cross_lock = False
+    modular_preview_show_dishes = False
+    modular_preview_show_inserts = False
+    modular_preview_show_baskets = False
+    modular_preview_show_reference_parts = True
+
+    # Part ID labels. These are made from simple stroke geometry, not font files,
+    # so they should export with STL/STEP without a FreeCAD font dependency.
+    # Default is engraved/recessed, not raised, so stacked parts sit flat.
+    enable_part_labels = False
+    label_style = "engraved"        # "engraved" or "raised"
+    label_depth = 0.35              # cut depth for engraved labels, mm
+    label_raised_height = 0.30      # extrusion height if label_style="raised", mm
+    label_stroke_width = 0.18
+    # Small default labels fit on narrow top frame/flange strips.
+    main_label_scale = 0.40
+    single_label_scale = 0.40
+    basket_label_scale = 0.40
+    dish_label_scale = 0.40
+
+    # Volume/capacity marks. 1 mL = 1000 mm^3. Marks are nominal geometric
+    # estimates, not calibrated metrology after slicer/extrusion effects.
+    enable_volume_bars = False
+    volume_bar_interval_ml = 25
+    volume_bar_major_every_ml = 50
+    volume_bar_length_minor = 5.0
+    volume_bar_length_major = 8.0
+    volume_bar_thickness_z = 0.45
+    volume_bar_projection = 0.35    # used only if volume_mark_style="raised"
+    volume_mark_style = "engraved"  # "engraved" avoids protrusions on fitting surfaces
+    volume_mark_depth = 0.30        # side-wall cut depth for engraved volume marks, mm
+    volume_label_every_ml = 25      # numeric side labels; set 0 to disable
+    volume_mark_top_exclusion_mm = 20.0  # no volume bars/labels in the top 20 mm safety zone
+    volume_label_scale = 0.40
+    volume_label_stroke_width = 0.28
+
+    # Central hollow irrigation/distribution column at the junction of the four openings.
+    enable_central_column = True
+    central_column_diameter = 6.0
+    central_column_clearance_to_openings = 0.30  # effective opening gaps grow if required
+    central_column_cutout_clearance = 0.20       # remove square junction material above bottom, then add column
+    central_column_bore_diameter = 2.6           # vertical blind top-fill bore
+    central_column_bore_bottom_z = 4.0           # bore stops here; must be above bottom, so bottom stays closed
+    central_column_port_diameter = 1.2           # horizontal liquid-distribution ports
+    central_column_port_levels = 5               # equally spaced along height
+    central_column_port_min_z = 8.0
+    central_column_port_max_z = 44.0
+
+    # What to build/display. Default macro view is intentionally simple:
+    # Main_Container, Dish, one Single_Container_A1, and one Basket_A1.
+    add_four_insert_copies = False
+    add_four_basket_copies = False
+    add_reference_parts_to_side = False
+    create_mating_dimensions_note = False
+
+    # Optional export settings. These are disabled by default so running as a
+    # FreeCAD macro only creates/shows the model. Enable only when needed.
+    export_step = False
+    export_stl = False
+    export_dir = os.path.join(os.path.expanduser("~"), "PET_plant_container_exports")
+    export_visible_only = False
+
+def main_opening_length():
+    return P.single_body_length + 2.0 * P.fit_clearance_xy
+
+
+def main_opening_width():
+    return P.single_body_width + 2.0 * P.fit_clearance_xy
+
+
+def effective_opening_gap_x():
+    if P.enable_central_column:
+        return max(P.opening_gap_x,
+                   P.central_column_diameter + 2.0 * P.central_column_clearance_to_openings)
+    return P.opening_gap_x
+
+
+def effective_opening_gap_y():
+    if P.enable_central_column:
+        return max(P.opening_gap_y,
+                   P.central_column_diameter + 2.0 * P.central_column_clearance_to_openings)
+    return P.opening_gap_y
+
+
+def _small_dimension_wall(requested_wall, length, width, fraction=0.30, min_wall=0.05):
+    """Return a wall thickness that cannot make the inside box negative.
+
+    This is mainly a geometry-safety helper. A 1 mm wide stress-test insert is
+    not a practical printable container with 1.5 mm walls, but the macro should
+    still regenerate cleanly and show that all dependent dimensions are linked.
+    """
+    min_dim = max(min(float(length), float(width)), 0.10)
+    return max(min_wall, min(float(requested_wall), min_dim * fraction))
+
+
+def effective_single_wall():
+    return _small_dimension_wall(P.single_wall, P.single_body_length, P.single_body_width, fraction=0.30)
+
+
+def effective_single_bottom():
+    return min(float(P.single_bottom), max(0.10, float(P.single_depth) - 0.50))
+
+
+def _scaled_allowance(dim, allowance, max_fraction=0.25):
+    """Limit basket allowance so very small inserts do not produce negative baskets."""
+    dim = max(float(dim), 0.10)
+    return min(float(allowance), dim * max_fraction)
+
+
+def main_bay_length():
+    """Overall span of the 2 x 2 opening group, including the top bridges."""
+    return 2.0 * main_opening_length() + effective_opening_gap_x()
+
+
+def main_bay_width():
+    """Overall span of the 2 x 2 opening group, including the top bridges."""
+    return 2.0 * main_opening_width() + effective_opening_gap_y()
+
+
+def internal_pin_required_wall_strip():
+    if not P.enable_alignment_pins:
+        return P.main_min_wall_thickness
+    return max(P.main_min_wall_thickness,
+               P.alignment_pin_diameter + 2.0 * P.alignment_pin_min_surround)
+
+
+def _normalise_modular_slot_sides():
+    sides = getattr(P, "modular_slot_sides", ("N", "S", "E", "W"))
+    if isinstance(sides, str):
+        # Accept strings such as "NSEW" or "N,S,E,W".
+        sides = sides.replace(",", " ").split() if "," in sides or " " in sides else list(sides)
+    return {str(side).strip().upper() for side in sides if str(side).strip()}
+
+
+def modular_slots_enabled():
+    return bool(getattr(P, "enable_modular_side_slots", False))
+
+
+def modular_top_locks_enabled():
+    return bool(getattr(P, "enable_modular_top_locks", False))
+
+
+def _normalise_modular_lock_sides():
+    sides = getattr(P, "modular_lock_sides", ("N", "S", "E", "W"))
+    if isinstance(sides, str):
+        sides = sides.replace(",", " ").split() if "," in sides or " " in sides else list(sides)
+    return {str(side).strip().upper() for side in sides if str(side).strip()}
+
+
+def modular_lock_required_wall_strip():
+    if not modular_top_locks_enabled():
+        return float(P.main_min_wall_thickness)
+    required = (float(P.modular_lock_pin_inset_from_outer_edge) +
+                (float(P.modular_lock_pin_diameter) + float(P.modular_lock_pin_clearance)) / 2.0 +
+                max(0.6, float(P.modular_lock_pin_min_end_margin) * 0.25))
+    return max(float(P.main_min_wall_thickness), required)
+
+
+def modular_slot_required_wall_strip():
+    if not modular_slots_enabled():
+        return float(P.main_min_wall_thickness)
+    return max(float(P.main_min_wall_thickness),
+               float(P.modular_slot_depth) + float(P.modular_slot_min_back_wall))
+
+
+def required_main_wall_strip_x():
+    """Required left/right wall strip before the opening group.
+
+    X-side strip must support E/W modular slots. Four-pin mode also needs room
+    for left/right internal alignment pins.
+    """
+    req = float(P.main_min_wall_thickness)
+    if int(P.alignment_pin_count) >= 4:
+        req = max(req, internal_pin_required_wall_strip())
+    if modular_slots_enabled() and ({"E", "W"} & _normalise_modular_slot_sides()):
+        req = max(req, modular_slot_required_wall_strip())
+    if modular_top_locks_enabled() and ({"E", "W"} & _normalise_modular_lock_sides()):
+        req = max(req, modular_lock_required_wall_strip())
+    return req
+
+
+def required_main_wall_strip_y():
+    """Required front/back wall strip before the opening group.
+
+    Y-side strip must support N/S modular slots and the default front/back
+    internal alignment pins.
+    """
+    req = float(P.main_min_wall_thickness)
+    if P.enable_alignment_pins:
+        req = max(req, internal_pin_required_wall_strip())
+    if modular_slots_enabled() and ({"N", "S"} & _normalise_modular_slot_sides()):
+        req = max(req, modular_slot_required_wall_strip())
+    if modular_top_locks_enabled() and ({"N", "S"} & _normalise_modular_lock_sides()):
+        req = max(req, modular_lock_required_wall_strip())
+    return req
+
+
+def effective_main_outer_length():
+    needed = main_bay_length() + 2.0 * required_main_wall_strip_x()
+    if getattr(P, "auto_fit_main_outer_xy_to_single", True):
+        return needed
+    return max(P.main_outer_length, needed)
+
+
+def effective_main_outer_width():
+    needed = main_bay_width() + 2.0 * required_main_wall_strip_y()
+    if getattr(P, "auto_fit_main_outer_xy_to_single", True):
+        return needed
+    return max(P.main_outer_width, needed)
+
+
+def dish_feature_group_length():
+    """Minimum X span needed by basket windows/lip recesses on the dish."""
+    feature_len = max(dish_window_length(),
+                      effective_basket_lip_length() + float(P.dish_basket_lip_recess_clearance))
+    return main_opening_length() + effective_opening_gap_x() + feature_len
+
+
+def dish_feature_group_width():
+    """Minimum Y span needed by basket windows/lip recesses on the dish."""
+    feature_wid = max(dish_window_width(),
+                      effective_basket_lip_width() + float(P.dish_basket_lip_recess_clearance))
+    return main_opening_width() + effective_opening_gap_y() + feature_wid
+
+
+def required_dish_outer_length_from_layout():
+    """Dish length derived from the generated holder and basket-seat layout."""
+    required_by_main = effective_main_outer_length() + 2.0 * float(P.dish_outer_overhang)
+    required_by_features = dish_feature_group_length() + 2.0 * float(P.dish_min_edge_margin)
+    return max(required_by_main, required_by_features)
+
+
+def required_dish_outer_width_from_layout():
+    """Dish width derived from the generated holder and basket-seat layout."""
+    required_by_main = effective_main_outer_width() + 2.0 * float(P.dish_outer_overhang)
+    required_by_features = dish_feature_group_width() + 2.0 * float(P.dish_min_edge_margin)
+    # Handles are separate tabs on the X ends, but the plate should still be wide
+    # enough to support their requested width. This does not make external lugs on
+    # the main holder.
+    if getattr(P, "enable_dish_handle", False):
+        required_by_features = max(required_by_features, float(P.dish_handle_width))
+    return max(required_by_main, required_by_features)
+
+
+def effective_dish_outer_length():
+    if P.auto_expand_dish_to_main:
+        required = required_dish_outer_length_from_layout()
+        if getattr(P, "auto_fit_dish_outer_xy_to_layout", True):
+            return required
+        return max(float(P.dish_outer_length), required)
+    return float(P.dish_outer_length)
+
+
+def effective_dish_outer_width():
+    if P.auto_expand_dish_to_main:
+        required = required_dish_outer_width_from_layout()
+        if getattr(P, "auto_fit_dish_outer_xy_to_layout", True):
+            return required
+        return max(float(P.dish_outer_width), required)
+    return float(P.dish_outer_width)
+
+
+def single_inner_length():
+    """Nominal clear inside length of one removable single container."""
+    return max(0.0, float(P.single_body_length) - 2.0 * effective_single_wall())
+
+
+def single_inner_width():
+    """Nominal clear inside width of one removable single container."""
+    return max(0.0, float(P.single_body_width) - 2.0 * effective_single_wall())
+
+
+def basket_to_single_clearance_x():
+    """One-side X clearance between basket lower body and single-container inner wall."""
+    if getattr(P, "basket_clearance_follows_fit_clearance", True):
+        return max(0.0, float(P.fit_clearance_xy))
+    return max(0.0, float(P.basket_to_single_inner_clearance_x))
+
+
+def basket_to_single_clearance_y():
+    """One-side Y clearance between basket lower body and single-container inner wall."""
+    if getattr(P, "basket_clearance_follows_fit_clearance", True):
+        return max(0.0, float(P.fit_clearance_xy))
+    return max(0.0, float(P.basket_to_single_inner_clearance_y))
+
+
+def effective_basket_body_length():
+    if P.derive_basket_from_single:
+        if getattr(P, "basket_lower_body_fits_inside_single", True):
+            # Parametric lower-body rule:
+            # basket lower length = single-container inside length - 2*clearance_x.
+            # This keeps the lower basket inside the insert while allowing the
+            # upper basket lip to remain intentionally larger.
+            return max(float(P.basket_min_body_dimension),
+                       single_inner_length() - 2.0 * basket_to_single_clearance_x())
+        return max(float(P.basket_min_body_dimension),
+                   float(P.single_body_length) - _scaled_allowance(P.single_body_length, P.basket_body_length_allowance))
+    return float(P.basket_body_length)
+
+
+def effective_basket_body_width():
+    if P.derive_basket_from_single:
+        if getattr(P, "basket_lower_body_fits_inside_single", True):
+            # Parametric lower-body rule in Y.
+            return max(float(P.basket_min_body_dimension),
+                       single_inner_width() - 2.0 * basket_to_single_clearance_y())
+        return max(float(P.basket_min_body_dimension),
+                   float(P.single_body_width) - _scaled_allowance(P.single_body_width, P.basket_body_width_allowance))
+    return float(P.basket_body_width)
+
+
+def effective_basket_wall():
+    return _small_dimension_wall(P.basket_wall, effective_basket_body_length(), effective_basket_body_width(), fraction=0.30)
+
+
+def effective_basket_bottom():
+    return min(float(P.basket_bottom), max(0.10, effective_basket_depth() - 0.50))
+
+
+def effective_basket_lip_length():
+    if P.derive_basket_from_single:
+        return effective_basket_body_length() + 2.0 * P.basket_lip_overhang_x
+    return P.basket_lip_length
+
+
+def effective_basket_lip_width():
+    if P.derive_basket_from_single:
+        return effective_basket_body_width() + 2.0 * P.basket_lip_overhang_y
+    return P.basket_lip_width
+
+
+def effective_main_height():
+    """Main holder height after optional auto-expansion for tall single inserts.
+
+    The user-facing parameter P.main_height is treated as a minimum. When
+    auto_expand_main_height_to_single is enabled, the generated main container is
+    made tall enough that the single-container body can hang into the holder while
+    still leaving the closed bottom intact.
+    """
+    h = float(P.main_height)
+    if getattr(P, "auto_expand_main_height_to_single", True):
+        needed = float(P.single_depth) + float(P.main_bottom_thickness) + max(0.0, float(P.z_clearance))
+        h = max(h, needed)
+    return h
+
+
+def effective_basket_depth():
+    """Basket body depth.
+
+    By default this keeps the earlier shallow-basket behaviour. If a user later
+    sets basket_bottom larger than basket_depth, effective_basket_bottom() clamps
+    the bottom thickness so FreeCAD does not receive a negative box height.
+    """
+    d = float(P.basket_depth)
+    if getattr(P, "auto_expand_basket_depth_to_bottom", False):
+        d = max(d, float(P.basket_bottom) + max(1.0, float(P.basket_min_open_depth)))
+    return max(0.50, d)
+
+
+def dish_window_length():
+    return effective_basket_body_length() + 2.0 * P.fit_clearance_xy
+
+
+def dish_window_width():
+    return effective_basket_body_width() + 2.0 * P.fit_clearance_xy
+
+
+def single_flange_length():
+    return main_opening_length() + 2.0 * P.single_top_flange_overhang
+
+
+def single_flange_width():
+    return main_opening_width() + 2.0 * P.single_top_flange_overhang
+
+
+def basket_total_height():
+    return effective_basket_depth() + P.basket_lip_thickness
+
+
+def grid_centres(pitch_x, pitch_y):
+    """Return 2 x 2 centres: lower-left, lower-right, upper-left, upper-right."""
+    return [
+        (-pitch_x / 2.0, -pitch_y / 2.0),
+        ( pitch_x / 2.0, -pitch_y / 2.0),
+        (-pitch_x / 2.0,  pitch_y / 2.0),
+        ( pitch_x / 2.0,  pitch_y / 2.0),
+    ]
+
+
+def opening_centres():
+    return grid_centres(main_opening_length() + effective_opening_gap_x(),
+                        main_opening_width() + effective_opening_gap_y())
+
+
+def alignment_pin_positions():
+    """Internal pin positions inside the main footprint.
+
+    Default two-pin layout: front/back pins on the central X rib, in the solid
+    perimeter strip outside the insert openings. This avoids external lugs and
+    avoids touching the removable single containers. Four-pin mode additionally
+    places left/right pins on the central Y rib.
+    """
+    L = effective_main_outer_length()
+    W = effective_main_outer_width()
+    strip_x = (L - main_bay_length()) / 2.0
+    strip_y = (W - main_bay_width()) / 2.0
+    y_abs = main_bay_width() / 2.0 + strip_y / 2.0
+    positions = [(0.0, -y_abs), (0.0, y_abs)]
+    if int(P.alignment_pin_count) >= 4:
+        x_abs = main_bay_length() / 2.0 + strip_x / 2.0
+        positions.extend([(-x_abs, 0.0), (x_abs, 0.0)])
+    return positions
+
+def validate_parameters():
+    if P.main_bottom_thickness <= 0:
+        raise ValueError("main_bottom_thickness must be positive because the bottom must remain closed.")
+    if P.main_bottom_thickness >= effective_main_height() - 2.0:
+        raise ValueError("main_bottom_thickness is too large for main_height.")
+    if P.main_min_wall_thickness <= 0:
+        raise ValueError("main_min_wall_thickness must be positive.")
+    if main_bay_length() >= effective_main_outer_length():
+        raise ValueError("Main opening group does not fit in X.")
+    if main_bay_width() >= effective_main_outer_width():
+        raise ValueError("Main opening group does not fit in Y.")
+    if P.connect_main_wells_internally:
+        if P.main_top_bridge_height <= 0:
+            raise ValueError("main_top_bridge_height must be positive to preserve four separate top openings.")
+        if P.main_bottom_thickness + P.main_top_bridge_height >= effective_main_height():
+            raise ValueError("main_bottom_thickness + main_top_bridge_height must be less than main_height.")
+    if P.single_body_length <= 0 or P.single_body_width <= 0:
+        raise ValueError("single_body_length and single_body_width must be positive.")
+    if effective_single_wall() <= 0:
+        raise ValueError("Effective single-container wall thickness must be positive.")
+    if P.single_depth <= effective_single_bottom() + 0.5:
+        raise ValueError("Single-container depth must be larger than effective bottom thickness.")
+    if P.dish_basket_lip_recess_depth >= P.dish_thickness:
+        raise ValueError("Dish lip recess depth must be less than dish_thickness.")
+    if getattr(P, "basket_lower_body_fits_inside_single", True):
+        if getattr(P, "basket_clearance_follows_fit_clearance", True):
+            if P.fit_clearance_xy < 0:
+                raise ValueError("fit_clearance_xy must be non-negative when basket clearance follows it.")
+        else:
+            if P.basket_to_single_inner_clearance_x < 0 or P.basket_to_single_inner_clearance_y < 0:
+                raise ValueError("basket_to_single_inner_clearance_x/y must be non-negative.")
+        if P.basket_min_body_dimension <= 0:
+            raise ValueError("basket_min_body_dimension must be positive.")
+        if effective_basket_body_length() > single_inner_length() + 1e-6:
+            raise ValueError("Basket lower body length is larger than the single-container internal length.")
+        if effective_basket_body_width() > single_inner_width() + 1e-6:
+            raise ValueError("Basket lower body width is larger than the single-container internal width.")
+    if effective_basket_body_length() <= 0 or effective_basket_body_width() <= 0:
+        raise ValueError("Effective basket footprint must be positive.")
+    if effective_basket_wall() <= 0:
+        raise ValueError("Effective basket wall thickness must be positive.")
+    if effective_basket_depth() <= effective_basket_bottom() + 0.5:
+        raise ValueError("Effective basket depth must be larger than effective basket bottom.")
+    if effective_basket_lip_length() <= dish_window_length() or effective_basket_lip_width() <= dish_window_width():
+        raise ValueError("Basket lip must be larger than the dish window so the dish can carry it.")
+    if P.enable_alignment_pins:
+        if P.alignment_pin_diameter <= 0 or P.alignment_pin_height <= 0:
+            raise ValueError("Alignment pin diameter/height must be positive.")
+        if P.alignment_pin_min_surround < 0.3:
+            raise ValueError("alignment_pin_min_surround should leave printable material around the pin.")
+        strip_y = (effective_main_outer_width() - main_bay_width()) / 2.0
+        if strip_y < P.alignment_pin_diameter + 2.0 * P.alignment_pin_min_surround - 1e-6:
+            raise ValueError("Y perimeter strip is too narrow for internal alignment pins.")
+        if int(P.alignment_pin_count) >= 4:
+            strip_x = (effective_main_outer_length() - main_bay_length()) / 2.0
+            if strip_x < P.alignment_pin_diameter + 2.0 * P.alignment_pin_min_surround - 1e-6:
+                raise ValueError("X perimeter strip is too narrow for four internal alignment pins.")
+    if modular_slots_enabled():
+        if P.modular_slot_depth <= 0 or P.modular_slot_height <= 0:
+            raise ValueError("modular_slot_depth and modular_slot_height must be positive.")
+        if P.modular_slot_min_back_wall < 0.6:
+            raise ValueError("modular_slot_min_back_wall should leave a printable sealed wall behind each slot.")
+        if P.modular_key_clearance < 0:
+            raise ValueError("modular_key_clearance must be non-negative.")
+        if P.modular_module_gap < 0:
+            raise ValueError("modular_module_gap must be non-negative.")
+        zmin = P.modular_slot_z_center - P.modular_slot_height / 2.0
+        zmax = P.modular_slot_z_center + P.modular_slot_height / 2.0
+        if zmin <= P.main_bottom_thickness + 0.5:
+            raise ValueError("Modular side slot is too low; keep it above the closed bottom.")
+        if zmax >= effective_main_height() - 1.0:
+            raise ValueError("Modular side slot is too high; keep it below the top rim/dish region.")
+        strip_x = (effective_main_outer_length() - main_bay_length()) / 2.0
+        strip_y = (effective_main_outer_width() - main_bay_width()) / 2.0
+        sides = _normalise_modular_slot_sides()
+        needed = P.modular_slot_depth + P.modular_slot_min_back_wall
+        if ({"E", "W"} & sides) and strip_x < needed - 1e-6:
+            raise ValueError("X perimeter strip is too narrow for E/W modular side slots.")
+        if ({"N", "S"} & sides) and strip_y < needed - 1e-6:
+            raise ValueError("Y perimeter strip is too narrow for N/S modular side slots.")
+        if P.modular_slot_length_x <= 0 or P.modular_slot_length_y <= 0:
+            raise ValueError("modular_slot_length_x/y must be positive.")
+        if int(getattr(P, "modular_array_count_x", 1)) < 1 or int(getattr(P, "modular_array_count_y", 1)) < 1:
+            raise ValueError("modular_array_count_x/y must be at least 1.")
+    if modular_top_locks_enabled():
+        if P.modular_lock_pin_diameter <= 0 or P.modular_lock_pin_depth <= 0:
+            raise ValueError("modular_lock_pin_diameter/depth must be positive.")
+        if P.modular_lock_pin_clearance < 0:
+            raise ValueError("modular_lock_pin_clearance must be non-negative.")
+        if P.modular_lock_pin_depth >= effective_main_height() - P.main_bottom_thickness - 1.0:
+            raise ValueError("modular_lock_pin_depth is too deep for the main container height.")
+        if P.modular_lock_pin_inset_from_outer_edge <= 0:
+            raise ValueError("modular_lock_pin_inset_from_outer_edge must be positive.")
+        if P.modular_lock_bridge_thickness <= 0 or P.modular_lock_bridge_width <= 0:
+            raise ValueError("modular_lock_bridge_thickness/width must be positive.")
+        if P.modular_lock_bridge_land_on_module <= 0:
+            raise ValueError("modular_lock_bridge_land_on_module must be positive.")
+        if P.modular_lock_bridge_pin_engagement <= 0:
+            raise ValueError("modular_lock_bridge_pin_engagement must be positive.")
+        if P.modular_lock_bridge_pin_engagement > P.modular_lock_pin_depth + 0.25:
+            raise ValueError("Bridge pin engagement should not exceed blind socket depth.")
+        sides = _normalise_modular_lock_sides()
+        strip_x = (effective_main_outer_length() - main_bay_length()) / 2.0
+        strip_y = (effective_main_outer_width() - main_bay_width()) / 2.0
+        required = modular_lock_required_wall_strip()
+        if ({"E", "W"} & sides) and strip_x < required - 1e-6:
+            raise ValueError("X perimeter strip is too narrow for modular top-lock sockets.")
+        if ({"N", "S"} & sides) and strip_y < required - 1e-6:
+            raise ValueError("Y perimeter strip is too narrow for modular top-lock sockets.")
+        if int(getattr(P, "modular_array_count_x", 1)) < 1 or int(getattr(P, "modular_array_count_y", 1)) < 1:
+            raise ValueError("modular_array_count_x/y must be at least 1.")
+    if P.enable_central_column:
+        if P.central_column_diameter <= 0:
+            raise ValueError("central_column_diameter must be positive.")
+        if P.central_column_bore_diameter >= P.central_column_diameter - 1.0:
+            raise ValueError("central_column_bore_diameter is too large; leave tube wall thickness.")
+        if P.central_column_bore_bottom_z <= P.main_bottom_thickness:
+            raise ValueError("central_column_bore_bottom_z must be above main_bottom_thickness so the bottom remains closed.")
+        if P.central_column_bore_bottom_z >= effective_main_height() - 2.0:
+            raise ValueError("central_column_bore_bottom_z is too high.")
+        if P.central_column_port_diameter <= 0:
+            raise ValueError("central_column_port_diameter must be positive.")
+        if P.central_column_port_min_z <= P.central_column_bore_bottom_z:
+            raise ValueError("central_column_port_min_z should be above the blind bore bottom.")
+        if P.central_column_port_max_z >= effective_main_height() - 1.0:
+            raise ValueError("central_column_port_max_z should remain below the top surface.")
+        if P.central_column_port_min_z > P.central_column_port_max_z:
+            raise ValueError("central_column_port_min_z must be <= central_column_port_max_z.")
+        if int(P.central_column_port_levels) < 1:
+            raise ValueError("central_column_port_levels must be at least 1.")
+
+
+# -----------------------------------------------------------------------------
+# Geometry helpers
+# -----------------------------------------------------------------------------
+def box_centered(length, width, height, zmin=0.0, x=0.0, y=0.0):
+    return Part.makeBox(
+        float(length), float(width), float(height),
+        App.Vector(float(x - length / 2.0), float(y - width / 2.0), float(zmin))
+    )
+
+
+def cylinder_z(diameter, height, zmin=0.0, x=0.0, y=0.0):
+    return Part.makeCylinder(
+        float(diameter) / 2.0,
+        float(height),
+        App.Vector(float(x), float(y), float(zmin)),
+        App.Vector(0, 0, 1),
+    )
+
+
+def cylinder_x(diameter, length, z=0.0, x=0.0, y=0.0):
+    return Part.makeCylinder(
+        float(diameter) / 2.0,
+        float(length),
+        App.Vector(float(x - length / 2.0), float(y), float(z)),
+        App.Vector(1, 0, 0),
+    )
+
+
+def cylinder_y(diameter, length, z=0.0, x=0.0, y=0.0):
+    return Part.makeCylinder(
+        float(diameter) / 2.0,
+        float(length),
+        App.Vector(float(x), float(y - length / 2.0), float(z)),
+        App.Vector(0, 1, 0),
+    )
+
+
+def modular_side_slot_cutters():
+    """Blind rectangular side-slot cutters for the main holder.
+
+    These are intentionally simple printable recesses. The connector key bridges
+    two opposing recesses. Recess depth is limited by validation so the slots do
+    not open into the liquid cavity.
+    """
+    if not modular_slots_enabled():
+        return []
+    L = effective_main_outer_length()
+    W = effective_main_outer_width()
+    sides = _normalise_modular_slot_sides()
+    zmin = float(P.modular_slot_z_center) - float(P.modular_slot_height) / 2.0
+    d = float(P.modular_slot_depth)
+    eps = 0.08
+    cutters = []
+
+    # North/south faces: slot length is along X; recess cuts inward along Y.
+    slot_len_x = min(float(P.modular_slot_length_x), max(1.0, L - 2.0 * P.main_min_wall_thickness))
+    if "N" in sides:
+        cutters.append(Part.makeBox(slot_len_x, d + eps, float(P.modular_slot_height),
+                                    App.Vector(-slot_len_x / 2.0, W / 2.0 - d, zmin)))
+    if "S" in sides:
+        cutters.append(Part.makeBox(slot_len_x, d + eps, float(P.modular_slot_height),
+                                    App.Vector(-slot_len_x / 2.0, -W / 2.0 - eps, zmin)))
+
+    # East/west faces: slot length is along Y; recess cuts inward along X.
+    slot_len_y = min(float(P.modular_slot_length_y), max(1.0, W - 2.0 * P.main_min_wall_thickness))
+    if "E" in sides:
+        cutters.append(Part.makeBox(d + eps, slot_len_y, float(P.modular_slot_height),
+                                    App.Vector(L / 2.0 - d, -slot_len_y / 2.0, zmin)))
+    if "W" in sides:
+        cutters.append(Part.makeBox(d + eps, slot_len_y, float(P.modular_slot_height),
+                                    App.Vector(-L / 2.0 - eps, -slot_len_y / 2.0, zmin)))
+    return cutters
+
+
+def modular_connector_key_shape(orientation="EW"):
+    """Separate key that bridges two neighbouring module side slots.
+
+    orientation="EW" connects west/east neighbours. orientation="NS" connects
+    south/north neighbours. The key is one removable printed part, not fused to
+    the main container.
+    """
+    orientation = str(orientation).strip().upper()
+    clearance = max(0.0, float(P.modular_key_clearance))
+    tongue_depth = max(0.2, float(P.modular_slot_depth) - clearance)
+    gap = max(0.0, float(P.modular_module_gap))
+    key_height = max(0.3, float(P.modular_slot_height) - 2.0 * clearance)
+    zmin = float(P.modular_slot_z_center) - key_height / 2.0
+
+    if orientation == "NS":
+        key_x = max(0.5, float(P.modular_slot_length_x) - 2.0 * clearance)
+        key_y = 2.0 * tongue_depth + gap
+        return box_centered(key_x, key_y, key_height, zmin, 0.0, 0.0)
+
+    key_x = 2.0 * tongue_depth + gap
+    key_y = max(0.5, float(P.modular_slot_length_y) - 2.0 * clearance)
+    return box_centered(key_x, key_y, key_height, zmin, 0.0, 0.0)
+
+
+def _clamped_lock_pair_offsets(total_span):
+    """Two pin offsets along a joint, centred and clamped to printable limits."""
+    pin_d = float(P.modular_lock_pin_diameter) + float(P.modular_lock_pin_clearance)
+    end_margin = max(float(P.modular_lock_pin_min_end_margin), pin_d)
+    max_half = max(0.0, float(total_span) / 2.0 - end_margin)
+    half = min(float(P.modular_lock_pin_pair_spacing) / 2.0, max_half)
+    if half < pin_d * 0.65:
+        return [0.0]
+    return [-half, half]
+
+
+def modular_lock_socket_positions_local():
+    """Return blind top-socket centres for one main container, grouped by side.
+
+    Sockets are placed in the solid outer perimeter strips, away from the removable
+    single containers. E/W sockets use two Y offsets; N/S sockets use two X offsets.
+    """
+    if not modular_top_locks_enabled():
+        return {}
+    L = effective_main_outer_length()
+    W = effective_main_outer_width()
+    inset = float(P.modular_lock_pin_inset_from_outer_edge)
+    sides = _normalise_modular_lock_sides()
+    x_edge = max(-L / 2.0, L / 2.0 - inset)
+    y_edge = max(-W / 2.0, W / 2.0 - inset)
+    y_offsets = _clamped_lock_pair_offsets(W)
+    x_offsets = _clamped_lock_pair_offsets(L)
+    out = {}
+    if "E" in sides:
+        out["E"] = [(x_edge, y) for y in y_offsets]
+    if "W" in sides:
+        out["W"] = [(-x_edge, y) for y in y_offsets]
+    if "N" in sides:
+        out["N"] = [(x, y_edge) for x in x_offsets]
+    if "S" in sides:
+        out["S"] = [(x, -y_edge) for x in x_offsets]
+    return out
+
+
+def modular_lock_socket_cutters():
+    """Blind vertical top-socket cutters for positive-lock bridge pins."""
+    if not modular_top_locks_enabled():
+        return []
+    socket_d = float(P.modular_lock_pin_diameter) + float(P.modular_lock_pin_clearance)
+    depth = float(P.modular_lock_pin_depth)
+    top_z = effective_main_height()
+    eps = 0.08
+    cutters = []
+    for centres in modular_lock_socket_positions_local().values():
+        for x, y in centres:
+            cutters.append(cylinder_z(socket_d, depth + eps, top_z - depth, x, y))
+    return cutters
+
+
+def modular_top_lock_bridge_shape(orientation="EW"):
+    """Separate removable bridge with downward pins.
+
+    EW bridges connect west/east neighbours; NS bridges connect south/north
+    neighbours. The bridge plate sits above the main-container rim and its pins
+    drop into blind sockets. This is a positive lock, unlike the older friction key.
+    """
+    orientation = str(orientation).strip().upper()
+    gap = max(0.0, float(P.modular_module_gap))
+    land = float(P.modular_lock_bridge_land_on_module)
+    bridge_w = float(P.modular_lock_bridge_width)
+    bridge_t = float(P.modular_lock_bridge_thickness)
+    clearance = max(0.0, float(P.modular_lock_pin_clearance))
+    pin_d = max(0.2, float(P.modular_lock_pin_diameter) - clearance)
+    pin_len = max(0.5, min(float(P.modular_lock_bridge_pin_engagement),
+                           float(P.modular_lock_pin_depth) - float(P.modular_lock_bridge_pin_tip_clearance)))
+    z_plate = effective_main_height() + float(P.modular_lock_bridge_top_clearance)
+
+    shapes = []
+    if orientation == "NS":
+        # Plate spans the Y gap and lands on both neighbouring modules.
+        plate_len_y = gap + 2.0 * land
+        plate = box_centered(bridge_w, plate_len_y, bridge_t, z_plate, 0.0, 0.0)
+        shapes.append(plate)
+        x_offsets = _clamped_lock_pair_offsets(effective_main_outer_length())
+        y_pin = gap / 2.0 + float(P.modular_lock_pin_inset_from_outer_edge)
+        for x in x_offsets:
+            for y in (-y_pin, y_pin):
+                shapes.append(cylinder_z(pin_d, pin_len, z_plate - pin_len, x, y))
+        return fuse_many(shapes)
+
+    # EW bridge: plate spans the X gap and lands on both neighbouring modules.
+    plate_len_x = gap + 2.0 * land
+    plate = box_centered(plate_len_x, bridge_w, bridge_t, z_plate, 0.0, 0.0)
+    shapes.append(plate)
+    y_offsets = _clamped_lock_pair_offsets(effective_main_outer_width())
+    x_pin = gap / 2.0 + float(P.modular_lock_pin_inset_from_outer_edge)
+    for x in (-x_pin, x_pin):
+        for y in y_offsets:
+            shapes.append(cylinder_z(pin_d, pin_len, z_plate - pin_len, x, y))
+    return fuse_many(shapes)
+
+
+def modular_central_cross_lock_shape():
+    """Optional one-piece cross plate at the 2 x 2 centre.
+
+    It uses the same four neighbouring socket groups around the central junction.
+    It is useful for a 2 x 2 array that may be moved as one water-filled unit.
+    """
+    size = float(P.modular_cross_lock_plate_size)
+    t = float(P.modular_cross_lock_plate_thickness)
+    gap = max(0.0, float(P.modular_module_gap))
+    clearance = max(0.0, float(P.modular_lock_pin_clearance))
+    pin_d = max(0.2, float(P.modular_lock_pin_diameter) - clearance)
+    pin_len = max(0.5, min(float(P.modular_lock_bridge_pin_engagement),
+                           float(P.modular_lock_pin_depth) - float(P.modular_lock_bridge_pin_tip_clearance)))
+    z_plate = effective_main_height() + float(P.modular_lock_bridge_top_clearance)
+    shapes = [box_centered(size, size, t, z_plate, 0.0, 0.0)]
+    # Four pins, one near each module corner around the central array joint.
+    pin_offset = gap / 2.0 + float(P.modular_lock_pin_inset_from_outer_edge)
+    for x in (-pin_offset, pin_offset):
+        for y in (-pin_offset, pin_offset):
+            shapes.append(cylinder_z(pin_d, pin_len, z_plate - pin_len, x, y))
+    return fuse_many(shapes)
+
+
+def modular_module_pitch_x():
+    return effective_main_outer_length() + max(0.0, float(P.modular_module_gap))
+
+
+def modular_module_pitch_y():
+    return effective_main_outer_width() + max(0.0, float(P.modular_module_gap))
+
+
+def modular_array_centres():
+    nx = max(1, int(getattr(P, "modular_array_count_x", 1)))
+    ny = max(1, int(getattr(P, "modular_array_count_y", 1)))
+    px = modular_module_pitch_x()
+    py = modular_module_pitch_y()
+    x0 = -(nx - 1) * px / 2.0
+    y0 = -(ny - 1) * py / 2.0
+    out = []
+    for j in range(ny):
+        for i in range(nx):
+            out.append((i + 1, j + 1, x0 + i * px, y0 + j * py))
+    return out
+
+
+def safe_remove_splitter(shape):
+    try:
+        return shape.removeSplitter()
+    except Exception:
+        return shape
+
+
+def safe_fillet(shape, radius):
+    if radius is None or radius <= 0:
+        return shape
+    try:
+        return shape.makeFillet(float(radius), shape.Edges)
+    except Exception:
+        return shape
+
+
+def cut_many(shape, cutters):
+    out = shape
+    for c in cutters:
+        out = out.cut(c)
+    return safe_remove_splitter(out)
+
+
+def fuse_many(shapes):
+    if not shapes:
+        raise ValueError("No shapes to fuse.")
+    out = shapes[0]
+    for s in shapes[1:]:
+        out = out.fuse(s)
+    return safe_remove_splitter(out)
+
+
+def add_feature(doc, name, shape, placement=None, color=None, transparency=None):
+    obj = doc.addObject("Part::Feature", name)
+    obj.Label = name
+    obj.Shape = shape
+    if placement is not None:
+        obj.Placement = placement
+    if Gui is not None and hasattr(obj, "ViewObject"):
+        if color is not None:
+            obj.ViewObject.ShapeColor = color
+        if transparency is not None:
+            obj.ViewObject.Transparency = transparency
+    return obj
+
+
+def clone_shape_feature(doc, name, source_shape, x=0.0, y=0.0, z=0.0, color=None, transparency=None):
+    pl = App.Placement(App.Vector(x, y, z), App.Rotation())
+    return add_feature(doc, name, source_shape, pl, color, transparency)
+
+
+def dish_handle_shape(zmin, height):
+    """Optional handle tab(s) for the dish only; the main box stays rectangular."""
+    if not P.enable_dish_handle:
+        return None
+    L = effective_dish_outer_length()
+    handle_len = P.dish_handle_length + P.dish_handle_overlap
+    x_abs = L / 2.0 + (P.dish_handle_length - P.dish_handle_overlap) / 2.0
+    handles = [box_centered(handle_len, P.dish_handle_width, height, zmin, x_abs, 0.0)]
+    if P.dish_handle_both_ends:
+        handles.append(box_centered(handle_len, P.dish_handle_width, height, zmin, -x_abs, 0.0))
+    return fuse_many(handles)
+
+def central_port_z_positions():
+    n = int(P.central_column_port_levels)
+    if n <= 1:
+        return [(P.central_column_port_min_z + P.central_column_port_max_z) / 2.0]
+    step = (P.central_column_port_max_z - P.central_column_port_min_z) / float(n - 1)
+    return [P.central_column_port_min_z + i * step for i in range(n)]
+
+
+def central_column_internal_cutters():
+    """Blind top bore plus radial ports. No cutter reaches the bottom face."""
+    cutters = []
+    if not P.enable_central_column:
+        return cutters
+    bore_height = effective_main_height() - P.central_column_bore_bottom_z + 2.0
+    cutters.append(cylinder_z(P.central_column_bore_diameter,
+                              bore_height,
+                              P.central_column_bore_bottom_z,
+                              0.0, 0.0))
+    port_len = P.central_column_diameter + 2.0
+    for z in central_port_z_positions():
+        cutters.append(cylinder_x(P.central_column_port_diameter, port_len, z, 0.0, 0.0))
+        cutters.append(cylinder_y(P.central_column_port_diameter, port_len, z, 0.0, 0.0))
+    return cutters
+
+
+def rectangle_union_area(rects):
+    """Exact union area for axis-aligned rectangles. rect=(xmin,xmax,ymin,ymax)."""
+    xs = sorted({r[0] for r in rects} | {r[1] for r in rects})
+    if len(xs) < 2:
+        return 0.0
+    area = 0.0
+    for x0, x1 in zip(xs[:-1], xs[1:]):
+        if x1 <= x0:
+            continue
+        intervals = []
+        xm = (x0 + x1) / 2.0
+        for rx0, rx1, ry0, ry1 in rects:
+            if rx0 <= xm <= rx1:
+                intervals.append((ry0, ry1))
+        if not intervals:
+            continue
+        intervals.sort()
+        merged = []
+        for y0, y1 in intervals:
+            if not merged or y0 > merged[-1][1]:
+                merged.append([y0, y1])
+            else:
+                merged[-1][1] = max(merged[-1][1], y1)
+        y_total = sum(y1 - y0 for y0, y1 in merged)
+        area += (x1 - x0) * y_total
+    return area
+
+
+def opening_rectangles():
+    rects = []
+    L = main_opening_length()
+    W = main_opening_width()
+    for x, y in opening_centres():
+        rects.append((x - L / 2.0, x + L / 2.0, y - W / 2.0, y + W / 2.0))
+    return rects
+
+
+def main_lower_cross_section_area_mm2():
+    rects = opening_rectangles()
+    if P.connect_main_wells_internally:
+        channel_x = effective_opening_gap_x() + 2.0 * P.main_connection_overlap
+        channel_y = effective_opening_gap_y() + 2.0 * P.main_connection_overlap
+        rects.append((-channel_x / 2.0, channel_x / 2.0, -main_bay_width() / 2.0, main_bay_width() / 2.0))
+        rects.append((-main_bay_length() / 2.0, main_bay_length() / 2.0, -channel_y / 2.0, channel_y / 2.0))
+    area = rectangle_union_area(rects)
+    if P.enable_central_column:
+        # Nominal displacement of the solid column within the connected lower area.
+        area -= math.pi * (P.central_column_diameter / 2.0) ** 2
+        # The blind bore is a small extra liquid volume above central_column_bore_bottom_z.
+        # It is intentionally ignored for side calibration marks because the side mark
+        # should mainly represent visible tray/well level rather than tube pre-fill.
+    return max(0.0, area)
+
+
+def main_upper_cross_section_area_mm2():
+    # Above the internal communication channel, only the four top opening columns are open.
+    return 4.0 * main_opening_length() * main_opening_width()
+
+
+def single_inner_cross_section_area_mm2():
+    return max(0.0, (P.single_body_length - 2.0 * effective_single_wall()) *
+                   (P.single_body_width - 2.0 * effective_single_wall()))
+
+
+def single_container_capacity_ml():
+    return single_inner_cross_section_area_mm2() * (P.single_depth - effective_single_bottom()) / 1000.0
+
+
+def main_container_capacity_ml():
+    lower_h = effective_main_height() - P.main_bottom_thickness - P.main_top_bridge_height
+    upper_h = P.main_top_bridge_height
+    return (main_lower_cross_section_area_mm2() * lower_h +
+            main_upper_cross_section_area_mm2() * upper_h) / 1000.0
+
+
+def single_level_z_for_volume_ml(ml):
+    area = single_inner_cross_section_area_mm2()
+    if area <= 0:
+        return None
+    h = float(ml) * 1000.0 / area
+    if h <= 0 or h >= (P.single_depth - effective_single_bottom()):
+        return None
+    return effective_single_bottom() + h
+
+
+def main_level_z_for_volume_ml(ml):
+    lower_area = main_lower_cross_section_area_mm2()
+    upper_area = main_upper_cross_section_area_mm2()
+    if lower_area <= 0 or upper_area <= 0:
+        return None
+    lower_h = effective_main_height() - P.main_bottom_thickness - P.main_top_bridge_height
+    v_mm3 = float(ml) * 1000.0
+    v_lower = lower_area * lower_h
+    if v_mm3 <= v_lower:
+        h = v_mm3 / lower_area
+    else:
+        h = lower_h + (v_mm3 - v_lower) / upper_area
+    if h <= 0 or h >= (effective_main_height() - P.main_bottom_thickness):
+        return None
+    return P.main_bottom_thickness + h
+
+
+def single_volume_mark_max_z():
+    """Highest allowed z for volume bars on the single-container side wall.
+
+    The top exclusion zone is measured from the physical top of the insert, including
+    its top flange. This keeps markings away from the upper ~20 mm while still
+    allowing a 25 mL label on the default insert if it is below that exclusion zone.
+    """
+    physical_top = P.single_depth + P.single_top_flange_thickness
+    return max(effective_single_bottom(), physical_top - max(0.0, P.volume_mark_top_exclusion_mm))
+
+
+def main_volume_mark_max_z():
+    """Highest allowed z for volume bars on the main-container side wall."""
+    return max(P.main_bottom_thickness, effective_main_height() - max(0.0, P.volume_mark_top_exclusion_mm))
+
+
+def volume_label_text(ml):
+    return str(int(ml))
+
+
+# Simple stroke text. This avoids dependency on a font file.
+_DIGIT_SEGS = {
+    "0": "ABCFED", "1": "BC", "2": "ABGED", "3": "ABGCD", "4": "FBGC",
+    "5": "AFGCD", "6": "AFGECD", "7": "ABC", "8": "ABCDEFG", "9": "ABFGCD",
+}
+
+
+def stroke_rects_for_char(ch, scale, stroke):
+    ch = ch.upper()
+    W = 3.0 * scale
+    H = 5.0 * scale
+    s = stroke
+    seg_rects = {
+        "A": (0.15 * scale, W - 0.15 * scale, H - s, H),
+        "G": (0.15 * scale, W - 0.15 * scale, H / 2.0 - s / 2.0, H / 2.0 + s / 2.0),
+        "D": (0.15 * scale, W - 0.15 * scale, 0.0, s),
+        "F": (0.0, s, H / 2.0, H),
+        "B": (W - s, W, H / 2.0, H),
+        "E": (0.0, s, 0.0, H / 2.0),
+        "C": (W - s, W, 0.0, H / 2.0),
+    }
+    if ch in _DIGIT_SEGS:
+        return [seg_rects[k] for k in _DIGIT_SEGS[ch]]
+    if ch == "A":
+        return [seg_rects[k] for k in "AFBGEC"]
+    if ch == "M":
+        # Blocky M: two verticals and two short upper diagonals approximated by vertical strokes.
+        return [seg_rects["F"], seg_rects["E"], seg_rects["B"], seg_rects["C"],
+                (W * 0.38 - s / 2.0, W * 0.38 + s / 2.0, H * 0.45, H),
+                (W * 0.62 - s / 2.0, W * 0.62 + s / 2.0, H * 0.45, H)]
+    if ch == "L":
+        return [seg_rects["F"], seg_rects["E"], seg_rects["D"]]
+    if ch == "-":
+        return [seg_rects["G"]]
+    return []
+
+
+def stroke_text_width(label, scale):
+    total = 0.0
+    for ch in str(label):
+        total += (2.0 if ch == " " else 4.0) * scale
+    return max(0.0, total - scale)
+
+
+def labels_are_engraved():
+    return str(getattr(P, "label_style", "engraved")).strip().lower().startswith("engr")
+
+
+def volume_marks_are_engraved():
+    return str(getattr(P, "volume_mark_style", "engraved")).strip().lower().startswith("engr")
+
+
+def top_text_shapes(label, center_x, center_y, zmin, scale, stroke, height):
+    """Stroke text made of rectangular prisms on a horizontal surface."""
+    shapes = []
+    label = str(label)
+    total_w = stroke_text_width(label, scale)
+    char_h = 5.0 * scale
+    x_cursor = center_x - total_w / 2.0
+    y_base = center_y - char_h / 2.0
+    for ch in label:
+        if ch == " ":
+            x_cursor += 2.0 * scale
+            continue
+        for x0, x1, y0, y1 in stroke_rects_for_char(ch, scale, stroke):
+            shapes.append(box_centered(x1 - x0, y1 - y0, height,
+                                       zmin,
+                                       x_cursor + (x0 + x1) / 2.0,
+                                       y_base + (y0 + y1) / 2.0))
+        x_cursor += 4.0 * scale
+    return shapes
+
+
+def top_part_label_shapes(label, center_x, center_y, z_top, scale, stroke):
+    """Return raised features or engraving cutters for a top-surface part label."""
+    if labels_are_engraved():
+        depth = max(0.05, float(P.label_depth))
+        # Cutters cross the top surface slightly to make boolean cuts more reliable.
+        return top_text_shapes(label, center_x, center_y, z_top - depth, scale, stroke, depth + 0.08)
+    height = max(0.05, float(P.label_raised_height))
+    return top_text_shapes(label, center_x, center_y, z_top, scale, stroke, height)
+
+
+def side_y_text_shapes(label, y_face, x_center, z_center, protrude_negative_y, scale, stroke, projection):
+    shapes = []
+    label = str(label)
+    total_w = stroke_text_width(label, scale)
+    char_h = 5.0 * scale
+    x_cursor = x_center - total_w / 2.0
+    z_base = z_center - char_h / 2.0
+    y0 = y_face - projection if protrude_negative_y else y_face
+    for ch in label:
+        if ch == " ":
+            x_cursor += 2.0 * scale
+            continue
+        for x0, x1, yy0, yy1 in stroke_rects_for_char(ch, scale, stroke):
+            shapes.append(Part.makeBox(x1 - x0, projection, yy1 - yy0,
+                                       App.Vector(x_cursor + x0, y0, z_base + yy0)))
+        x_cursor += 4.0 * scale
+    return shapes
+
+
+def side_y_text_cut_shapes(label, y_face, x_center, z_center, scale, stroke, depth):
+    """Stroke text cutters for the negative-Y side face; cuts inward without protrusion."""
+    shapes = []
+    label = str(label)
+    total_w = stroke_text_width(label, scale)
+    char_h = 5.0 * scale
+    x_cursor = x_center - total_w / 2.0
+    z_base = z_center - char_h / 2.0
+    outside_eps = 0.05
+    y0 = y_face - outside_eps
+    y_depth = max(0.05, float(depth)) + outside_eps
+    for ch in label:
+        if ch == " ":
+            x_cursor += 2.0 * scale
+            continue
+        for x0, x1, yy0, yy1 in stroke_rects_for_char(ch, scale, stroke):
+            shapes.append(Part.makeBox(x1 - x0, y_depth, yy1 - yy0,
+                                       App.Vector(x_cursor + x0, y0, z_base + yy0)))
+        x_cursor += 4.0 * scale
+    return shapes
+
+
+def side_y_bar_shape(x_center, y_face, z_center, length, thickness_z):
+    """Volume tick mark as a raised feature or an engraved cutter on the negative-Y face."""
+    if volume_marks_are_engraved():
+        outside_eps = 0.05
+        depth = max(0.05, float(P.volume_mark_depth)) + outside_eps
+        return Part.makeBox(float(length), depth, float(thickness_z),
+                            App.Vector(float(x_center - length / 2.0),
+                                       float(y_face - outside_eps),
+                                       float(z_center - thickness_z / 2.0)))
+    return box_centered(length, P.volume_bar_projection, thickness_z,
+                        z_center - thickness_z / 2.0,
+                        x_center,
+                        y_face - P.volume_bar_projection / 2.0)
+
+
+def fuse_optional_features(base_shape, feature_shapes):
+    feature_shapes = [s for s in feature_shapes if s is not None]
+    if not feature_shapes:
+        return base_shape
+    return fuse_many([base_shape] + feature_shapes)
+
+
+def apply_part_label_features(base_shape, label_shapes):
+    label_shapes = [s for s in label_shapes if s is not None]
+    if not label_shapes:
+        return base_shape
+    if labels_are_engraved():
+        return cut_many(base_shape, label_shapes)
+    return fuse_many([base_shape] + label_shapes)
+
+
+def apply_volume_mark_features(base_shape, mark_shapes):
+    mark_shapes = [s for s in mark_shapes if s is not None]
+    if not mark_shapes:
+        return base_shape
+    if volume_marks_are_engraved():
+        return cut_many(base_shape, mark_shapes)
+    return fuse_many([base_shape] + mark_shapes)
+
+
+def main_label_shapes():
+    if not P.enable_part_labels:
+        return []
+    shapes = []
+    wall_strip_y = (effective_main_outer_width() - main_bay_width()) / 2.0
+    y_edge_offset = max(1.2, min(wall_strip_y * 0.55, 4.0))
+    labels = ["A1", "A2", "A3", "A4"]
+    for label, (x, y) in zip(labels, opening_centres()):
+        # Put labels on the outer top wall adjacent to each opening, not floating over the openings.
+        y_label = y - math.copysign(main_opening_width() / 2.0 + y_edge_offset, y)
+        # For lower row y is negative, above expression moves label outward; for upper row outward too.
+        if y < 0:
+            y_label = y - main_opening_width() / 2.0 - y_edge_offset
+        else:
+            y_label = y + main_opening_width() / 2.0 + y_edge_offset
+        shapes.extend(top_part_label_shapes(label, x, y_label, effective_main_height(), P.main_label_scale,
+                                           P.label_stroke_width))
+    return shapes
+
+
+def single_label_shapes(label):
+    if not P.enable_part_labels:
+        return []
+    # On the front flange, away from the open cup.
+    y = -single_flange_width() / 2.0 + max(2.0, P.single_top_flange_overhang * 0.75)
+    return top_part_label_shapes(label, 0.0, y, P.single_depth + P.single_top_flange_thickness,
+                                 P.single_label_scale, P.label_stroke_width)
+
+
+def basket_label_shapes(label):
+    if not P.enable_part_labels:
+        return []
+    y = -effective_basket_lip_width() / 2.0 + max(1.6, P.basket_lip_overhang_y * 0.7)
+    return top_part_label_shapes(label, 0.0, y, basket_total_height(),
+                                 P.basket_label_scale, P.label_stroke_width)
+
+
+def dish_label_shapes():
+    if not P.enable_part_labels:
+        return []
+    shapes = []
+    labels = ["A1", "A2", "A3", "A4"]
+    # Use the solid front/back dish frame beside each basket window. This keeps the
+    # labels on printable material and away from the basket openings.
+    pitch_y = main_opening_width() + effective_opening_gap_y()
+    dish_window_group_width = pitch_y + dish_window_width()
+    side_strip_y = max(0.0, (effective_dish_outer_width() - dish_window_group_width) / 2.0)
+    outward_offset = max(1.2, min(side_strip_y * 0.50, 4.0))
+    for label, (x, y) in zip(labels, opening_centres()):
+        if y < 0:
+            y_label = y - dish_window_width() / 2.0 - outward_offset
+        else:
+            y_label = y + dish_window_width() / 2.0 + outward_offset
+        shapes.extend(top_part_label_shapes(label, x, y_label, P.dish_thickness,
+                                           P.dish_label_scale, P.label_stroke_width))
+    return shapes
+
+
+def single_volume_bar_shapes():
+    if not P.enable_volume_bars:
+        return []
+    shapes = []
+    y_face = -P.single_body_width / 2.0
+    x0 = -P.single_body_length / 2.0 + 1.5
+    interval = max(1, int(P.volume_bar_interval_ml))
+    capacity = single_container_capacity_ml()
+    ml = interval
+    max_mark_z = single_volume_mark_max_z()
+    while ml < capacity - 0.1:
+        z = single_level_z_for_volume_ml(ml)
+        if z is not None and z <= max_mark_z + 1e-6:
+            major = P.volume_bar_major_every_ml > 0 and (ml % int(P.volume_bar_major_every_ml) == 0)
+            bar_len = P.volume_bar_length_major if major else P.volume_bar_length_minor
+            shapes.append(side_y_bar_shape(x0 + bar_len / 2.0, y_face, z,
+                                           bar_len, P.volume_bar_thickness_z))
+            if P.volume_label_every_ml and (ml % int(P.volume_label_every_ml) == 0):
+                if volume_marks_are_engraved():
+                    shapes.extend(side_y_text_cut_shapes(volume_label_text(ml), y_face,
+                                                         x0 + bar_len + 4.0, z,
+                                                         P.volume_label_scale,
+                                                         P.volume_label_stroke_width,
+                                                         P.volume_mark_depth))
+                else:
+                    shapes.extend(side_y_text_shapes(volume_label_text(ml), y_face,
+                                                     x0 + bar_len + 4.0, z,
+                                                     True, P.volume_label_scale,
+                                                     P.volume_label_stroke_width,
+                                                     P.volume_bar_projection))
+        ml += interval
+    return shapes
+
+
+def main_volume_bar_shapes():
+    if not P.enable_volume_bars:
+        return []
+    shapes = []
+    y_face = -effective_main_outer_width() / 2.0
+    x0 = -effective_main_outer_length() / 2.0 + 3.0
+    interval = max(1, int(P.volume_bar_interval_ml))
+    capacity = main_container_capacity_ml()
+    ml = interval
+    max_mark_z = main_volume_mark_max_z()
+    while ml < capacity - 0.1:
+        z = main_level_z_for_volume_ml(ml)
+        if z is not None and z <= max_mark_z + 1e-6:
+            major = P.volume_bar_major_every_ml > 0 and (ml % int(P.volume_bar_major_every_ml) == 0)
+            bar_len = P.volume_bar_length_major if major else P.volume_bar_length_minor
+            shapes.append(side_y_bar_shape(x0 + bar_len / 2.0, y_face, z,
+                                           bar_len, P.volume_bar_thickness_z))
+            if P.volume_label_every_ml and (ml % int(P.volume_label_every_ml) == 0):
+                if volume_marks_are_engraved():
+                    shapes.extend(side_y_text_cut_shapes(volume_label_text(ml), y_face,
+                                                         x0 + bar_len + 4.0, z,
+                                                         P.volume_label_scale,
+                                                         P.volume_label_stroke_width,
+                                                         P.volume_mark_depth))
+                else:
+                    shapes.extend(side_y_text_shapes(volume_label_text(ml), y_face,
+                                                     x0 + bar_len + 4.0, z,
+                                                     True, P.volume_label_scale,
+                                                     P.volume_label_stroke_width,
+                                                     P.volume_bar_projection))
+        ml += interval
+    return shapes
+
+
+
+# -----------------------------------------------------------------------------
+# V18/V19 parametric-box curved slot/tab modular connector overrides
+# -----------------------------------------------------------------------------
+def _v18_curve_width(t, face_value, deep_value):
+    """Smoothly widen a slot/tab from its face throat to its deeper body."""
+    t = max(0.0, min(1.0, float(t)))
+    power = max(0.10, float(P.modular_curve_power))
+    shaped = math.sin(0.5 * math.pi * t) ** power
+    return float(face_value) + (float(deep_value) - float(face_value)) * shaped
+
+
+def _v18_closed_wire(points):
+    pts = list(points)
+    if pts[0] != pts[-1]:
+        pts.append(pts[0])
+    return Part.makePolygon(pts)
+
+
+def _v18_wire_y_plane_vertical(y, tangent_center, z0, z1, tangent_width):
+    u0 = tangent_center - tangent_width / 2.0
+    u1 = tangent_center + tangent_width / 2.0
+    return _v18_closed_wire([
+        App.Vector(u0, y, z0), App.Vector(u1, y, z0),
+        App.Vector(u1, y, z1), App.Vector(u0, y, z1),
+    ])
+
+
+def _v18_wire_x_plane_vertical(x, tangent_center, z0, z1, tangent_width):
+    u0 = tangent_center - tangent_width / 2.0
+    u1 = tangent_center + tangent_width / 2.0
+    return _v18_closed_wire([
+        App.Vector(x, u0, z0), App.Vector(x, u1, z0),
+        App.Vector(x, u1, z1), App.Vector(x, u0, z1),
+    ])
+
+
+def _v18_wire_y_plane_horizontal(y, tangent_center, tangent_length, z_center, vertical_height):
+    u0 = tangent_center - tangent_length / 2.0
+    u1 = tangent_center + tangent_length / 2.0
+    z0 = z_center - vertical_height / 2.0
+    z1 = z_center + vertical_height / 2.0
+    return _v18_closed_wire([
+        App.Vector(u0, y, z0), App.Vector(u1, y, z0),
+        App.Vector(u1, y, z1), App.Vector(u0, y, z1),
+    ])
+
+
+def _v18_wire_x_plane_horizontal(x, tangent_center, tangent_length, z_center, vertical_height):
+    u0 = tangent_center - tangent_length / 2.0
+    u1 = tangent_center + tangent_length / 2.0
+    z0 = z_center - vertical_height / 2.0
+    z1 = z_center + vertical_height / 2.0
+    return _v18_closed_wire([
+        App.Vector(x, u0, z0), App.Vector(x, u1, z0),
+        App.Vector(x, u1, z1), App.Vector(x, u0, z1),
+    ])
+
+
+def _v18_side_slot_z_center():
+    low = P.main_bottom_thickness + P.modular_side_slot_deep_height / 2.0 + 2.0
+    high = effective_main_height() - P.modular_side_slot_deep_height / 2.0 - 3.0
+    requested = float(P.modular_side_slot_z_fraction) * effective_main_height()
+    return max(low, min(high, requested))
+
+
+def _v18_top_slot_offsets(side):
+    count = max(1, int(P.modular_top_slots_per_side))
+    span = effective_main_outer_length() if side in ("N", "S") else effective_main_outer_width()
+    if count == 1:
+        return [0.0]
+    max_offset = max(0.0, span / 2.0 - P.modular_top_slot_deep_width - 2.0)
+    base = min(max_offset, span * float(P.modular_top_slot_offset_fraction))
+    if count == 2:
+        return [-base, base]
+    if count <= 1 or base <= 0:
+        return [0.0]
+    return [(-base + 2.0 * base * i / float(count - 1)) for i in range(count)]
+
+
+def _v18_top_vertical_slot_cutter(side, tangent_offset):
+    """Top-open curved dovetail slot descending vertically from a side-wall top edge."""
+    L = effective_main_outer_length()
+    W = effective_main_outer_width()
+    H = effective_main_height()
+    depth = float(P.modular_slot_depth)
+    eps = float(P.modular_boolean_eps)
+    n = max(3, int(P.modular_curve_steps))
+    z0 = H - float(P.modular_top_slot_vertical_length)
+    z1 = H + eps
+    wires = []
+    for i in range(n):
+        t = i / float(n - 1)
+        width = _v18_curve_width(t, P.modular_top_slot_face_width, P.modular_top_slot_deep_width)
+        if side == "N":
+            coord = W / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_y_plane_vertical(coord, tangent_offset, z0, z1, width))
+        elif side == "S":
+            coord = -W / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_y_plane_vertical(coord, tangent_offset, z0, z1, width))
+        elif side == "E":
+            coord = L / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_x_plane_vertical(coord, tangent_offset, z0, z1, width))
+        elif side == "W":
+            coord = -L / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_x_plane_vertical(coord, tangent_offset, z0, z1, width))
+        else:
+            raise ValueError(f"Unknown modular side: {side}")
+    return Part.makeLoft(wires, True)
+
+
+def _v18_side_horizontal_slot_cutter(side, tangent_offset=0.0):
+    """Curved dovetail slot whose long axis is horizontal on the side face."""
+    L = effective_main_outer_length()
+    W = effective_main_outer_width()
+    depth = float(P.modular_slot_depth)
+    eps = float(P.modular_boolean_eps)
+    n = max(3, int(P.modular_curve_steps))
+    zc = _v18_side_slot_z_center()
+    tangent_length = float(P.modular_side_slot_horizontal_length)
+    wires = []
+    for i in range(n):
+        t = i / float(n - 1)
+        vertical_height = _v18_curve_width(t, P.modular_side_slot_face_height, P.modular_side_slot_deep_height)
+        if side == "N":
+            coord = W / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_y_plane_horizontal(coord, tangent_offset, tangent_length, zc, vertical_height))
+        elif side == "S":
+            coord = -W / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_y_plane_horizontal(coord, tangent_offset, tangent_length, zc, vertical_height))
+        elif side == "E":
+            coord = L / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_x_plane_horizontal(coord, tangent_offset, tangent_length, zc, vertical_height))
+        elif side == "W":
+            coord = -L / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_x_plane_horizontal(coord, tangent_offset, tangent_length, zc, vertical_height))
+        else:
+            raise ValueError(f"Unknown modular side: {side}")
+    return Part.makeLoft(wires, True)
+
+
+def modular_side_slot_cutters():
+    """V18 connector slots: top-vertical plus side-horizontal; never bottom slots."""
+    if not modular_slots_enabled():
+        return []
+    cutters = []
+    for side in sorted(_normalise_modular_slot_sides()):
+        if getattr(P, "enable_modular_top_vertical_slots", True):
+            for offset in _v18_top_slot_offsets(side):
+                cutters.append(_v18_top_vertical_slot_cutter(side, offset))
+        if getattr(P, "enable_modular_side_horizontal_slots", True):
+            cutters.append(_v18_side_horizontal_slot_cutter(side, 0.0))
+    return cutters
+
+
+def _v18_double_top_tab(orientation="NS", tangent_offset=0.0):
+    """One recessed top-inserted double-sided curved tab with a smaller plier head."""
+    orientation = str(orientation).upper()
+    clear = max(0.0, float(P.modular_key_clearance))
+    face_w = max(0.5, float(P.modular_top_slot_face_width) - clear)
+    deep_w = max(face_w + 0.1, float(P.modular_top_slot_deep_width) - clear)
+    half_depth = max(0.3, float(P.modular_slot_depth) - float(P.modular_fit_clearance_depth_per_side))
+    total_depth = 2.0 * half_depth + max(0.0, float(P.modular_module_gap))
+    head_h = max(0.4, float(P.modular_tab_head_height))
+    body_len = max(1.0, float(P.modular_top_slot_vertical_length) - float(P.modular_top_tab_length_clearance) - head_h)
+    n = max(3, int(P.modular_curve_steps))
+    wires = []
+    for i in range(2 * n - 1):
+        s = i / float(2 * n - 2)
+        normal = -total_depth / 2.0 + total_depth * s
+        width = _v18_curve_width(abs(s - 0.5) * 2.0, face_w, deep_w)
+        if orientation == "NS":
+            wires.append(_v18_wire_y_plane_vertical(normal, tangent_offset, 0.0, body_len, width))
+        else:
+            wires.append(_v18_wire_x_plane_vertical(normal, tangent_offset, 0.0, body_len, width))
+    body = Part.makeLoft(wires, True)
+
+    # A narrow recessed head is smaller than the body and remains below the top surface.
+    head_w = max(0.6, face_w * float(P.modular_tab_head_width_fraction))
+    head_normal = max(0.4, float(P.modular_module_gap) + float(P.modular_tab_head_gap_depth))
+    if orientation == "NS":
+        head = box_centered(head_w, head_normal, head_h, body_len, tangent_offset, 0.0)
+    else:
+        head = box_centered(head_normal, head_w, head_h, body_len, 0.0, tangent_offset)
+    shape = fuse_many([body, head])
+    shape = safe_fillet(shape, float(P.modular_tab_edge_fillet))
+    z_place = effective_main_height() - float(P.modular_top_tab_surface_recess) - (body_len + head_h)
+    moved = shape.copy()
+    moved.translate(App.Vector(0.0, 0.0, z_place))
+    return moved
+
+
+def _v18_double_side_tab(orientation="NS"):
+    """One horizontal double-sided curved tab with a small recessed plier grip."""
+    orientation = str(orientation).upper()
+    clear = max(0.0, float(P.modular_key_clearance))
+    face_h = max(0.5, float(P.modular_side_slot_face_height) - clear)
+    deep_h = max(face_h + 0.1, float(P.modular_side_slot_deep_height) - clear)
+    half_depth = max(0.3, float(P.modular_slot_depth) - float(P.modular_fit_clearance_depth_per_side))
+    total_depth = 2.0 * half_depth + max(0.0, float(P.modular_module_gap))
+    body_len = max(1.0, float(P.modular_side_slot_horizontal_length) - float(P.modular_side_tab_length_clearance))
+    n = max(3, int(P.modular_curve_steps))
+    wires = []
+    for i in range(2 * n - 1):
+        s = i / float(2 * n - 2)
+        normal = -total_depth / 2.0 + total_depth * s
+        height = _v18_curve_width(abs(s - 0.5) * 2.0, face_h, deep_h)
+        if orientation == "NS":
+            wires.append(_v18_wire_y_plane_horizontal(normal, 0.0, body_len, 0.0, height))
+        else:
+            wires.append(_v18_wire_x_plane_horizontal(normal, 0.0, body_len, 0.0, height))
+    body = Part.makeLoft(wires, True)
+
+    # Smaller plier heads extend into the intentionally unused slot length at
+    # both ends. They remain inside the slot envelope, so they create no bump,
+    # but an accessible end can be grasped with needle-nose pliers.
+    spare_each_end = max(0.4, float(P.modular_side_tab_length_clearance) / 2.0)
+    grip_tangent = max(0.5, min(float(P.modular_tab_head_length), spare_each_end * 0.85))
+    grip_normal = max(0.4, float(P.modular_module_gap) + float(P.modular_tab_head_gap_depth))
+    grip_height = max(0.5, face_h * float(P.modular_tab_head_width_fraction))
+    grip_offset = body_len / 2.0 + grip_tangent / 2.0
+    if orientation == "NS":
+        grip_a = box_centered(grip_tangent, grip_normal, grip_height, -grip_height / 2.0, -grip_offset, 0.0)
+        grip_b = box_centered(grip_tangent, grip_normal, grip_height, -grip_height / 2.0,  grip_offset, 0.0)
+    else:
+        grip_a = box_centered(grip_normal, grip_tangent, grip_height, -grip_height / 2.0, 0.0, -grip_offset)
+        grip_b = box_centered(grip_normal, grip_tangent, grip_height, -grip_height / 2.0, 0.0,  grip_offset)
+    shape = fuse_many([body, grip_a, grip_b])
+    shape = safe_fillet(shape, float(P.modular_tab_edge_fillet))
+    moved = shape.copy()
+    moved.translate(App.Vector(0.0, 0.0, _v18_side_slot_z_center()))
+    return moved
+
+
+def modular_connector_key_shape(orientation="EW"):
+    """Return the complete recessed connector set for one neighbouring-module joint.
+
+    The compound contains two vertical top tabs plus one horizontal side tab.
+    It has no blind top bridge and no protruding external handle.
+    """
+    orientation = str(orientation).strip().upper()
+    tangent_side = "N" if orientation == "NS" else "E"
+    shapes = []
+    if getattr(P, "enable_modular_top_vertical_slots", True):
+        for offset in _v18_top_slot_offsets(tangent_side):
+            shapes.append(_v18_double_top_tab(orientation, offset))
+    if getattr(P, "enable_modular_side_horizontal_slots", True):
+        shapes.append(_v18_double_side_tab(orientation))
+    return Part.makeCompound(shapes)
+
+
+# Add v18-specific checks while preserving all earlier validation.
+_validate_parameters_v17 = validate_parameters
+
+def validate_parameters():
+    _validate_parameters_v17()
+    if not modular_slots_enabled():
+        return
+    if P.modular_top_slot_deep_width <= P.modular_top_slot_face_width:
+        raise ValueError("modular_top_slot_deep_width must exceed modular_top_slot_face_width for dovetail locking.")
+    if P.modular_side_slot_deep_height <= P.modular_side_slot_face_height:
+        raise ValueError("modular_side_slot_deep_height must exceed modular_side_slot_face_height for dovetail locking.")
+    if P.modular_top_slot_vertical_length <= P.modular_top_tab_length_clearance + P.modular_tab_head_height + 1.0:
+        raise ValueError("Top slot must be longer than the recessed top tab plus its plier head.")
+    if P.modular_side_slot_horizontal_length <= P.modular_side_tab_length_clearance + 1.0:
+        raise ValueError("Horizontal side slot must be longer than its recessed tab.")
+    if P.modular_slot_depth + P.modular_slot_min_back_wall > min(required_main_wall_strip_x(), required_main_wall_strip_y()) + 1e-6:
+        raise ValueError("Modular slot depth/back-wall requirement exceeds the generated perimeter wall strip.")
+    if P.modular_curve_steps < 3:
+        raise ValueError("modular_curve_steps must be at least 3.")
+
+
+# -----------------------------------------------------------------------------
+# V19 edge-open modular connector overrides
+# -----------------------------------------------------------------------------
+def _v19_edge_slot_z_centres(side):
+    """Return staggered side-edge slot heights for one side orientation."""
+    side = str(side).upper()
+    if side in ("N", "S"):
+        fractions = tuple(getattr(P, "modular_edge_slot_z_fractions_ns", (0.30, 0.62)))
+    else:
+        fractions = tuple(getattr(P, "modular_edge_slot_z_fractions_ew", (0.44, 0.76)))
+    requested_count = max(1, int(getattr(P, "modular_edge_slots_per_vertical_edge", 2)))
+    if len(fractions) < requested_count:
+        # Parametric fallback: evenly distribute requested levels while avoiding
+        # the closed bottom and top rim.
+        fractions = tuple((i + 1.0) / (requested_count + 1.0) for i in range(requested_count))
+    H = effective_main_height()
+    half_h = float(P.modular_edge_slot_deep_height) / 2.0
+    z_min = float(P.main_bottom_thickness) + half_h + 2.0
+    z_max = H - half_h - max(4.0, float(P.main_top_bridge_height))
+    return [max(z_min, min(z_max, float(fractions[i]) * H)) for i in range(requested_count)]
+
+
+def _v19_edge_tangent_center(side, edge_sign):
+    """Centre an edge-open slot so one end reaches the selected vertical corner."""
+    side = str(side).upper()
+    edge_sign = 1.0 if float(edge_sign) >= 0 else -1.0
+    span = effective_main_outer_length() if side in ("N", "S") else effective_main_outer_width()
+    length = float(P.modular_edge_slot_insertion_length)
+    eps = float(P.modular_boolean_eps)
+    return edge_sign * (span / 2.0 - length / 2.0 + eps / 2.0)
+
+
+def _v19_edge_vertical_slot_cutter(side, edge_sign, z_center):
+    """Curved dovetail slot on a side face, open to a vertical corner edge.
+
+    Its visible footprint is tall and narrow, matching the user's blue-marked
+    edge position. The slot reaches the corner edge so the connector tab slides
+    in horizontally from that edge rather than projecting from the flat wall.
+    """
+    L = effective_main_outer_length()
+    W = effective_main_outer_width()
+    depth = float(P.modular_slot_depth)
+    eps = float(P.modular_boolean_eps)
+    n = max(3, int(P.modular_curve_steps))
+    tangent_center = _v19_edge_tangent_center(side, edge_sign)
+    tangent_length = float(P.modular_edge_slot_insertion_length) + eps
+    wires = []
+    for i in range(n):
+        t = i / float(n - 1)
+        vertical_height = _v18_curve_width(
+            t,
+            P.modular_edge_slot_face_height,
+            P.modular_edge_slot_deep_height,
+        )
+        if side == "N":
+            coord = W / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_y_plane_horizontal(coord, tangent_center, tangent_length,
+                                                       z_center, vertical_height))
+        elif side == "S":
+            coord = -W / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_y_plane_horizontal(coord, tangent_center, tangent_length,
+                                                       z_center, vertical_height))
+        elif side == "E":
+            coord = L / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_x_plane_horizontal(coord, tangent_center, tangent_length,
+                                                       z_center, vertical_height))
+        elif side == "W":
+            coord = -L / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_x_plane_horizontal(coord, tangent_center, tangent_length,
+                                                       z_center, vertical_height))
+        else:
+            raise ValueError(f"Unknown modular side: {side}")
+    return Part.makeLoft(wires, True)
+
+
+def modular_side_slot_cutters():
+    """V19 slots: retain top slots, remove flat-wall slots, add edge-open slots.
+
+    No connector feature is added to the bottom. Every side has four edge slots:
+    two vertical edges multiplied by two staggered height levels.
+    """
+    if not modular_slots_enabled():
+        return []
+    cutters = []
+    for side in sorted(_normalise_modular_slot_sides()):
+        if getattr(P, "enable_modular_top_vertical_slots", True):
+            for offset in _v18_top_slot_offsets(side):
+                cutters.append(_v18_top_vertical_slot_cutter(side, offset))
+        if getattr(P, "enable_modular_edge_slots", True):
+            for edge_sign in (-1.0, 1.0):
+                for zc in _v19_edge_slot_z_centres(side):
+                    cutters.append(_v19_edge_vertical_slot_cutter(side, edge_sign, zc))
+    return cutters
+
+
+def _v19_double_edge_tab(orientation="EW", edge_sign=1.0, z_center=0.0):
+    """Double-sided connector tab for one pair of opposing edge-open slots.
+
+    The main body is shorter than the slot. A smaller head occupies only part of
+    the unused length near the edge, leaving a recess where needle-nose pliers can
+    grip it for disassembly. Nothing projects beyond the module side envelope.
+    """
+    orientation = str(orientation).upper()
+    edge_sign = 1.0 if float(edge_sign) >= 0 else -1.0
+    clear = max(0.0, float(P.modular_key_clearance))
+    face_h = max(0.5, float(P.modular_edge_slot_face_height) - clear)
+    deep_h = max(face_h + 0.1, float(P.modular_edge_slot_deep_height) - clear)
+    half_depth = max(0.3, float(P.modular_slot_depth) - float(P.modular_fit_clearance_depth_per_side))
+    total_depth = 2.0 * half_depth + max(0.0, float(P.modular_module_gap))
+    slot_len = float(P.modular_edge_slot_insertion_length)
+    spare = max(0.8, float(P.modular_edge_tab_length_clearance))
+    body_len = max(1.0, slot_len - spare)
+    span = effective_main_outer_width() if orientation == "EW" else effective_main_outer_length()
+
+    # Put the body against the inward end of the edge-open slot, leaving all
+    # removable/grip clearance at the outside corner edge.
+    tangent_center = edge_sign * (span / 2.0 - spare - body_len / 2.0)
+    n = max(3, int(P.modular_curve_steps))
+    wires = []
+    for i in range(2 * n - 1):
+        s = i / float(2 * n - 2)
+        normal = -total_depth / 2.0 + total_depth * s
+        height = _v18_curve_width(abs(s - 0.5) * 2.0, face_h, deep_h)
+        if orientation == "EW":
+            # Across an E/W joint: normal X, tangent Y.
+            wires.append(_v18_wire_x_plane_horizontal(normal, tangent_center, body_len,
+                                                       z_center, height))
+        else:
+            # Across an N/S joint: normal Y, tangent X.
+            wires.append(_v18_wire_y_plane_horizontal(normal, tangent_center, body_len,
+                                                       z_center, height))
+    body = Part.makeLoft(wires, True)
+
+    head_len = max(0.5, min(float(P.modular_edge_tab_head_length), spare * 0.70))
+    head_height = max(0.5, face_h * float(P.modular_edge_tab_head_height_fraction))
+    head_normal = max(0.4, float(P.modular_module_gap) + float(P.modular_tab_head_gap_depth))
+    # Head starts where the body ends and points toward the accessible edge.
+    head_tangent_center = edge_sign * (span / 2.0 - spare + head_len / 2.0)
+    if orientation == "EW":
+        head = box_centered(head_normal, head_len, head_height,
+                            z_center - head_height / 2.0, 0.0, head_tangent_center)
+    else:
+        head = box_centered(head_len, head_normal, head_height,
+                            z_center - head_height / 2.0, head_tangent_center, 0.0)
+    return safe_fillet(fuse_many([body, head]), float(P.modular_tab_edge_fillet))
+
+
+def modular_connector_key_shape(orientation="EW"):
+    """Complete v19 connector set for one neighbouring-module joint.
+
+    It contains the retained top-inserted tabs plus four edge tabs: two endpoint
+    edges x two staggered height levels. The removed flat-wall horizontal tab is
+    not generated.
+    """
+    orientation = str(orientation).strip().upper()
+    shapes = []
+    tangent_side = "E" if orientation == "EW" else "N"
+    if getattr(P, "enable_modular_top_vertical_slots", True):
+        for offset in _v18_top_slot_offsets(tangent_side):
+            shapes.append(_v18_double_top_tab(orientation, offset))
+    if getattr(P, "enable_modular_edge_slots", True):
+        for edge_sign in (-1.0, 1.0):
+            for zc in _v19_edge_slot_z_centres(tangent_side):
+                shapes.append(_v19_double_edge_tab(orientation, edge_sign, zc))
+    return Part.makeCompound(shapes)
+
+
+_validate_parameters_v19_base = validate_parameters
+
+def validate_parameters():
+    _validate_parameters_v19_base()
+    if not modular_slots_enabled() or not getattr(P, "enable_modular_edge_slots", True):
+        return
+    if int(P.modular_edge_slots_per_vertical_edge) < 1:
+        raise ValueError("modular_edge_slots_per_vertical_edge must be at least 1.")
+    if P.modular_edge_slot_insertion_length <= P.modular_edge_tab_length_clearance + 1.0:
+        raise ValueError("Edge slot insertion length must exceed tab clearance plus 1 mm.")
+    if P.modular_edge_slot_deep_height <= P.modular_edge_slot_face_height:
+        raise ValueError("modular_edge_slot_deep_height must exceed face height for dovetail locking.")
+    if P.modular_edge_tab_head_length >= P.modular_edge_tab_length_clearance:
+        raise ValueError("Edge-tab head must be shorter than the unused slot length for plier access.")
+    if P.modular_edge_slot_insertion_length >= min(effective_main_outer_length(), effective_main_outer_width()) / 2.0:
+        raise ValueError("Edge slot insertion length is too large for the main-container footprint.")
+
+# -----------------------------------------------------------------------------
+# Part builders
+# -----------------------------------------------------------------------------
+def make_main_container():
+    """Main holder with one perimeter wall, closed bottom, connected lower wells.
+
+    The only top openings are the four rectangular insert openings. Below the top
+    bridge/rib, the four wells are connected through lower side channels. The
+    bottom remains closed because all pocket/channel cuts start at or above
+    main_bottom_thickness.
+    """
+    base = box_centered(effective_main_outer_length(), effective_main_outer_width(), effective_main_height(), 0.0)
+
+    cutters = []
+
+    # Four top pockets. They stop at the bottom-thickness plane.
+    pocket_cut_height = effective_main_height() - P.main_bottom_thickness + 2.0
+    for x, y in opening_centres():
+        cutters.append(box_centered(main_opening_length(), main_opening_width(),
+                                    pocket_cut_height,
+                                    P.main_bottom_thickness,
+                                    x, y))
+
+    # Lower communication channels through internal divider walls only.
+    if P.connect_main_wells_internally:
+        channel_zmin = P.main_bottom_thickness
+        channel_height = effective_main_height() - P.main_bottom_thickness - P.main_top_bridge_height
+        channel_x = effective_opening_gap_x() + 2.0 * P.main_connection_overlap
+        channel_y = effective_opening_gap_y() + 2.0 * P.main_connection_overlap
+        cutters.append(box_centered(channel_x, main_bay_width(), channel_height, channel_zmin, 0.0, 0.0))
+        cutters.append(box_centered(main_bay_length(), channel_y, channel_height, channel_zmin, 0.0, 0.0))
+
+    # Remove bulky square junction material above the closed bottom, then add back
+    # a cylindrical column. This keeps the bottom sealed while avoiding a double-wall look.
+    if P.enable_central_column:
+        cutout = P.central_column_diameter + 2.0 * P.central_column_cutout_clearance
+        cutters.append(box_centered(cutout, cutout,
+                                    effective_main_height() - P.main_bottom_thickness + 2.0,
+                                    P.main_bottom_thickness,
+                                    0.0, 0.0))
+
+    # Blind modular side slots are outside-wall recesses only; validation ensures
+    # a sealed back wall remains before the liquid cavity. They are alignment aids only.
+    cutters.extend(modular_side_slot_cutters())
+
+    # V17 bridge sockets are disabled in v18; no blind top-lock bridge is used.
+    cutters.extend(modular_lock_socket_cutters())
+
+    shape = cut_many(base, cutters)
+
+    if P.enable_central_column:
+        column = cylinder_z(P.central_column_diameter, effective_main_height(), 0.0, 0.0, 0.0)
+        shape = fuse_many([shape, column])
+        shape = cut_many(shape, central_column_internal_cutters())
+
+    if P.enable_alignment_pins:
+        pins = [cylinder_z(P.alignment_pin_diameter, P.alignment_pin_height, effective_main_height(), x, y)
+                for x, y in alignment_pin_positions()]
+        shape = fuse_many([shape] + pins)
+
+    shape = apply_part_label_features(shape, main_label_shapes())
+    shape = apply_volume_mark_features(shape, main_volume_bar_shapes())
+
+    shape = safe_fillet(shape, P.fillet_radius)
+    return shape
+
+
+def make_single_container(label="A1"):
+    """One removable open-top insert container with a top lip/flange."""
+    sw = effective_single_wall()
+    sb = effective_single_bottom()
+    outer = box_centered(P.single_body_length, P.single_body_width, P.single_depth, 0.0)
+    inner = box_centered(P.single_body_length - 2.0 * sw,
+                         P.single_body_width - 2.0 * sw,
+                         P.single_depth - sb + 1.0,
+                         sb,
+                         0.0, 0.0)
+    cup = outer.cut(inner)
+
+    flange = box_centered(single_flange_length(), single_flange_width(),
+                          P.single_top_flange_thickness, P.single_depth)
+    flange_hole = box_centered(P.single_body_length - 2.0 * sw,
+                               P.single_body_width - 2.0 * sw,
+                               P.single_top_flange_thickness + 2.0,
+                               P.single_depth - 1.0)
+    flange = flange.cut(flange_hole)
+
+    shape = fuse_many([cup, flange])
+    shape = apply_part_label_features(shape, single_label_shapes(label))
+    shape = apply_volume_mark_features(shape, single_volume_bar_shapes())
+    shape = safe_fillet(shape, P.single_corner_fillet)
+    return shape
+
+
+def make_dish():
+    """Top dish/carrier plate with basket windows and matching alignment-pin holes."""
+    plate = box_centered(effective_dish_outer_length(), effective_dish_outer_width(), P.dish_thickness, 0.0)
+
+    if P.enable_dish_handle:
+        handle = dish_handle_shape(0.0, P.dish_thickness)
+        if handle is not None:
+            plate = fuse_many([plate, handle])
+
+    cutters = []
+    for x, y in opening_centres():
+        cutters.append(box_centered(dish_window_length(), dish_window_width(),
+                                    P.dish_thickness + 2.0, -1.0, x, y))
+        cutters.append(box_centered(effective_basket_lip_length() + P.dish_basket_lip_recess_clearance,
+                                    effective_basket_lip_width() + P.dish_basket_lip_recess_clearance,
+                                    P.dish_basket_lip_recess_depth + 0.05,
+                                    P.dish_thickness - P.dish_basket_lip_recess_depth,
+                                    x, y))
+
+    # Central fill/access hole for liquid injection into the hollow main-column bore.
+    if P.enable_central_column and P.dish_central_fill_hole_diameter > 0:
+        cutters.append(cylinder_z(P.dish_central_fill_hole_diameter,
+                                  P.dish_thickness + 2.0,
+                                  -1.0, 0.0, 0.0))
+
+    if P.enable_alignment_pins:
+        pin_hole_d = P.alignment_pin_diameter + P.alignment_pin_hole_clearance
+        for x, y in alignment_pin_positions():
+            cutters.append(cylinder_z(pin_hole_d, P.dish_thickness + 2.0, -1.0, x, y))
+
+    shape = cut_many(plate, cutters)
+    shape = apply_part_label_features(shape, dish_label_shapes())
+    shape = safe_fillet(shape, P.fillet_radius)
+    return shape
+
+
+def make_basket(label="A1"):
+    """One open-top plant basket with top lip and perforations."""
+    bw = effective_basket_wall()
+    bb = effective_basket_bottom()
+    bd = effective_basket_depth()
+    body_outer = box_centered(effective_basket_body_length(), effective_basket_body_width(), bd, 0.0)
+    body_inner = box_centered(effective_basket_body_length() - 2.0 * bw,
+                              effective_basket_body_width() - 2.0 * bw,
+                              bd - bb + 1.0,
+                              bb)
+    basket = body_outer.cut(body_inner)
+
+    lip = box_centered(effective_basket_lip_length(), effective_basket_lip_width(),
+                       P.basket_lip_thickness, bd)
+    lip_hole = box_centered(effective_basket_body_length() - 2.0 * bw,
+                            effective_basket_body_width() - 2.0 * bw,
+                            P.basket_lip_thickness + 2.0,
+                            bd - 1.0)
+    lip = lip.cut(lip_hole)
+    basket = basket.fuse(lip)
+
+    cutters = []
+
+    # Bottom drainage/root slots.
+    usable_x = effective_basket_body_length() - 2.0 * bw - P.basket_bottom_slot_length
+    usable_y = effective_basket_body_width() - 2.0 * bw - P.basket_bottom_slot_width
+    nx = max(1, int(math.floor(usable_x / P.basket_bottom_slot_pitch_x)) + 1)
+    ny = max(1, int(math.floor(usable_y / P.basket_bottom_slot_pitch_y)) + 1)
+    for ix in range(nx):
+        x = (ix - (nx - 1) / 2.0) * P.basket_bottom_slot_pitch_x
+        for iy in range(ny):
+            y = (iy - (ny - 1) / 2.0) * P.basket_bottom_slot_pitch_y
+            cutters.append(box_centered(P.basket_bottom_slot_length,
+                                        P.basket_bottom_slot_width,
+                                        bb + 2.0,
+                                        -1.0, x, y))
+
+    # Long-wall side slots.
+    slot_count_x = max(1, int((effective_basket_body_length() - 2.0 * bw) / P.basket_side_slot_pitch))
+    for ix in range(slot_count_x):
+        x = (ix - (slot_count_x - 1) / 2.0) * P.basket_side_slot_pitch
+        for y in (-effective_basket_body_width() / 2.0, effective_basket_body_width() / 2.0):
+            cutters.append(box_centered(P.basket_side_slot_length,
+                                        bw * 3.0,
+                                        P.basket_side_slot_height,
+                                        P.basket_side_slot_z,
+                                        x, y))
+
+    # Short-wall side slots.
+    slot_count_y = max(1, int((effective_basket_body_width() - 2.0 * bw) / P.basket_side_slot_pitch))
+    for iy in range(slot_count_y):
+        y = (iy - (slot_count_y - 1) / 2.0) * P.basket_side_slot_pitch
+        for x in (-effective_basket_body_length() / 2.0, effective_basket_body_length() / 2.0):
+            cutters.append(box_centered(bw * 3.0,
+                                        P.basket_side_slot_length,
+                                        P.basket_side_slot_height,
+                                        P.basket_side_slot_z,
+                                        x, y))
+
+    basket = cut_many(basket, cutters)
+    basket = apply_part_label_features(basket, basket_label_shapes(label))
+    basket = safe_fillet(basket, P.basket_corner_fillet)
+    return basket
+
+
+# -----------------------------------------------------------------------------
+# Assembly and export
+# -----------------------------------------------------------------------------
+def create_document():
+    validate_parameters()
+
+    doc = App.newDocument("PET_Plant_Container_Parametric")
+
+    main_shape = make_main_container()
+    dish_shape = make_dish()
+
+    # Stack positions. The insert body extends down into the main opening; the flange
+    # top is above the main holder. Dish sits above the insert flange.
+    insert_z = effective_main_height() - P.single_depth
+    dish_z = effective_main_height() + P.single_top_flange_thickness + P.z_clearance
+    basket_z = dish_z + P.dish_thickness - effective_basket_depth()
+
+    show_array = bool(getattr(P, "show_modular_array_preview", False))
+
+    if show_array:
+        # Modular preview: show an array of identical main containers. Each module
+        # contains four openings, so a 2 x 2 preview represents 16 plant positions.
+        for i, j, x, y in modular_array_centres():
+            clone_shape_feature(doc, f"Main_Container_M{i}_{j}", main_shape, x, y, 0.0,
+                                color=(0.78, 0.78, 0.78), transparency=35)
+
+            if getattr(P, "modular_preview_show_dishes", False):
+                clone_shape_feature(doc, f"Dish_M{i}_{j}", dish_shape, x, y, dish_z,
+                                    color=(0.35, 0.55, 0.95), transparency=30)
+
+            if getattr(P, "modular_preview_show_inserts", False):
+                for k, (ox, oy) in enumerate(opening_centres(), start=1):
+                    clone_shape_feature(doc, f"Single_Container_M{i}_{j}_A{k}",
+                                        make_single_container(f"A{k}"),
+                                        x + ox, y + oy, insert_z,
+                                        color=(0.40, 0.85, 0.55), transparency=45)
+
+            if getattr(P, "modular_preview_show_baskets", False):
+                for k, (ox, oy) in enumerate(opening_centres(), start=1):
+                    clone_shape_feature(doc, f"Basket_M{i}_{j}_A{k}",
+                                        make_basket(f"A{k}"),
+                                        x + ox, y + oy, basket_z,
+                                        color=(0.95, 0.75, 0.35), transparency=15)
+
+        nx = max(1, int(getattr(P, "modular_array_count_x", 1)))
+        ny = max(1, int(getattr(P, "modular_array_count_y", 1)))
+        px = modular_module_pitch_x()
+        py = modular_module_pitch_y()
+        x0 = -(nx - 1) * px / 2.0
+        y0 = -(ny - 1) * py / 2.0
+
+        if modular_slots_enabled() and getattr(P, "modular_preview_show_connector_keys", False):
+            # V19 recessed curved-dovetail connector sets: retained top tabs
+            # plus four edge-open tabs per neighbouring-module joint.
+            ew_key = modular_connector_key_shape("EW")
+            ns_key = modular_connector_key_shape("NS")
+            for j in range(ny):
+                y = y0 + j * py
+                for i in range(nx - 1):
+                    x = x0 + (i + 0.5) * px
+                    clone_shape_feature(doc, f"Modular_Connector_Set_EW_{i+1}_{j+1}", ew_key, x, y, 0.0,
+                                        color=(0.20, 0.20, 0.20), transparency=0)
+            for j in range(ny - 1):
+                y = y0 + (j + 0.5) * py
+                for i in range(nx):
+                    x = x0 + i * px
+                    clone_shape_feature(doc, f"Modular_Connector_Set_NS_{i+1}_{j+1}", ns_key, x, y, 0.0,
+                                        color=(0.20, 0.20, 0.20), transparency=0)
+
+        if modular_top_locks_enabled() and getattr(P, "modular_preview_show_top_lock_bridges", True):
+            ew_bridge = modular_top_lock_bridge_shape("EW")
+            ns_bridge = modular_top_lock_bridge_shape("NS")
+            # East-west top locks: one bridge between horizontal neighbours in each row.
+            for j in range(ny):
+                y = y0 + j * py
+                for i in range(nx - 1):
+                    x = x0 + (i + 0.5) * px
+                    clone_shape_feature(doc, f"Top_Lock_Bridge_EW_{i+1}_{j+1}", ew_bridge, x, y, 0.0,
+                                        color=(0.05, 0.05, 0.05), transparency=0)
+            # North-south top locks: one bridge between vertical neighbours in each column.
+            for j in range(ny - 1):
+                y = y0 + (j + 0.5) * py
+                for i in range(nx):
+                    x = x0 + i * px
+                    clone_shape_feature(doc, f"Top_Lock_Bridge_NS_{i+1}_{j+1}", ns_bridge, x, y, 0.0,
+                                        color=(0.05, 0.05, 0.05), transparency=0)
+
+            if (getattr(P, "enable_modular_central_cross_lock", False) and
+                    getattr(P, "modular_preview_show_central_cross_lock", True) and nx == 2 and ny == 2):
+                clone_shape_feature(doc, "Top_Central_Cross_Lock", modular_central_cross_lock_shape(),
+                                    0.0, 0.0, 0.0, color=(0.02, 0.02, 0.02), transparency=0)
+
+        if getattr(P, "modular_preview_show_reference_parts", True):
+            # Place one representative dish/single/basket beside the array so their
+            # unchanged mating dimensions remain visible without filling every module.
+            nx = max(1, int(getattr(P, "modular_array_count_x", 1)))
+            array_half_x = (nx - 1) * modular_module_pitch_x() / 2.0 + effective_main_outer_length() / 2.0
+            x_ref = array_half_x + max(35.0, effective_dish_outer_length() / 2.0 + 20.0)
+            clone_shape_feature(doc, "Reference_Dish", dish_shape, x_ref, 0.0, dish_z,
+                                color=(0.35, 0.55, 0.95), transparency=30)
+            clone_shape_feature(doc, "Reference_Single_Container_A1", make_single_container("A1"),
+                                x_ref, -effective_dish_outer_width() / 2.0 - 20.0, 0.0,
+                                color=(0.40, 0.85, 0.55), transparency=25)
+            clone_shape_feature(doc, "Reference_Basket_A1", make_basket("A1"),
+                                x_ref, effective_dish_outer_width() / 2.0 + 20.0, 0.0,
+                                color=(0.95, 0.75, 0.35), transparency=5)
+            if modular_slots_enabled() and getattr(P, "modular_preview_show_connector_keys", False):
+                clone_shape_feature(doc, "Reference_Modular_Connector_Set_EW", modular_connector_key_shape("EW"),
+                                    x_ref, effective_dish_outer_width() / 2.0 + 45.0, 0.0,
+                                    color=(0.20, 0.20, 0.20), transparency=0)
+                clone_shape_feature(doc, "Reference_Modular_Connector_Set_NS", modular_connector_key_shape("NS"),
+                                    x_ref, effective_dish_outer_width() / 2.0 + 60.0, 0.0,
+                                    color=(0.20, 0.20, 0.20), transparency=0)
+            if modular_top_locks_enabled():
+                clone_shape_feature(doc, "Reference_Top_Lock_Bridge_EW", modular_top_lock_bridge_shape("EW"),
+                                    x_ref, effective_dish_outer_width() / 2.0 + 45.0, 0.0,
+                                    color=(0.05, 0.05, 0.05), transparency=0)
+                clone_shape_feature(doc, "Reference_Top_Lock_Bridge_NS", modular_top_lock_bridge_shape("NS"),
+                                    x_ref, effective_dish_outer_width() / 2.0 + 65.0, 0.0,
+                                    color=(0.05, 0.05, 0.05), transparency=0)
+                if getattr(P, "enable_modular_central_cross_lock", False):
+                    clone_shape_feature(doc, "Reference_Top_Central_Cross_Lock", modular_central_cross_lock_shape(),
+                                        x_ref, effective_dish_outer_width() / 2.0 + 90.0, 0.0,
+                                        color=(0.02, 0.02, 0.02), transparency=0)
+
+    else:
+        add_feature(doc, "Main_Container", main_shape, color=(0.78, 0.78, 0.78), transparency=35)
+        add_feature(doc, "Dish", dish_shape,
+                    App.Placement(App.Vector(0, 0, dish_z), App.Rotation()),
+                    color=(0.35, 0.55, 0.95), transparency=30)
+
+        centres = opening_centres()
+        if P.add_four_insert_copies:
+            for i, (x, y) in enumerate(centres, start=1):
+                single_shape_i = make_single_container(f"A{i}")
+                clone_shape_feature(doc, f"Single_Container_A{i}", single_shape_i, x, y, insert_z,
+                                    color=(0.40, 0.85, 0.55), transparency=45)
+        else:
+            x, y = centres[0]
+            single_shape = make_single_container("A1")
+            clone_shape_feature(doc, "Single_Container_A1", single_shape, x, y, insert_z,
+                                color=(0.40, 0.85, 0.55), transparency=45)
+
+        if P.add_four_basket_copies:
+            for i, (x, y) in enumerate(centres, start=1):
+                basket_shape_i = make_basket(f"A{i}")
+                clone_shape_feature(doc, f"Basket_A{i}", basket_shape_i, x, y, basket_z,
+                                    color=(0.95, 0.75, 0.35), transparency=15)
+        else:
+            x, y = centres[0]
+            basket_shape = make_basket("A1")
+            clone_shape_feature(doc, "Basket_A1", basket_shape, x, y, basket_z,
+                                color=(0.95, 0.75, 0.35), transparency=15)
+
+        if P.add_reference_parts_to_side:
+            x_ref = effective_main_outer_length() / 2.0 + 50.0
+            clone_shape_feature(doc, "Reference_Single_Container_A1", make_single_container("A1"), x_ref, -20.0, 0.0,
+                                color=(0.40, 0.85, 0.55), transparency=25)
+            clone_shape_feature(doc, "Reference_Basket_A1", make_basket("A1"), x_ref, 25.0, 0.0,
+                                color=(0.95, 0.75, 0.35), transparency=5)
+            if modular_slots_enabled():
+                clone_shape_feature(doc, "Reference_Modular_Key_EW", modular_connector_key_shape("EW"), x_ref, 50.0, 0.0,
+                                    color=(0.15, 0.15, 0.15), transparency=0)
+                clone_shape_feature(doc, "Reference_Modular_Key_NS", modular_connector_key_shape("NS"), x_ref, 65.0, 0.0,
+                                    color=(0.15, 0.15, 0.15), transparency=0)
+
+    # Optional hidden annotation with critical mating/capacity dimensions. Disabled
+    # by default because the user asked for Mating_Dimensions_Note not to be shown.
+    if P.create_mating_dimensions_note:
+        note = doc.addObject("App::Annotation", "Mating_Dimensions_Note")
+        note.LabelText = [
+            "Critical mating dimensions:",
+            f"Main opening = {main_opening_length():.2f} x {main_opening_width():.2f} mm",
+            f"Single body = {P.single_body_length:.2f} x {P.single_body_width:.2f} mm",
+            f"Dish window = {dish_window_length():.2f} x {dish_window_width():.2f} mm",
+            f"Basket body = {effective_basket_body_length():.2f} x {effective_basket_body_width():.2f} mm",
+            f"Single-container nominal capacity = {single_container_capacity_ml():.1f} mL",
+            f"Main-container nominal capacity = {main_container_capacity_ml():.1f} mL",
+            f"Nominal one-side XY clearance = {P.fit_clearance_xy:.2f} mm",
+            f"Volume marks omitted above top {P.volume_mark_top_exclusion_mm:.1f} mm zone",
+            f"Effective main outer = {effective_main_outer_length():.2f} x {effective_main_outer_width():.2f} x {effective_main_height():.2f} mm",
+            f"Modular preview = {getattr(P, 'modular_array_count_x', 1)} x {getattr(P, 'modular_array_count_y', 1)} modules",
+            f"Main bottom closed = YES; bottom thickness = {P.main_bottom_thickness:.2f} mm",
+        ]
+        note.Position = App.Vector(-effective_main_outer_length() / 2.0,
+                                   -effective_main_outer_width() / 2.0 - 18.0,
+                                   0.0)
+        if Gui is not None and hasattr(note, "ViewObject"):
+            note.ViewObject.Visibility = False
+
+    App.Console.PrintMessage(f"Single-container nominal capacity: {single_container_capacity_ml():.1f} mL\n")
+    App.Console.PrintMessage(f"Main-container nominal capacity: {main_container_capacity_ml():.1f} mL\n")
+    if show_array:
+        total_modules = max(1, int(P.modular_array_count_x)) * max(1, int(P.modular_array_count_y))
+        App.Console.PrintMessage(f"Modular preview: {P.modular_array_count_x} x {P.modular_array_count_y} modules = {total_modules * 4} plant openings\n")
+        if modular_slots_enabled():
+            App.Console.PrintMessage("Modular connector tabs are separate removable parts; flat-wall slots are removed and edge slots are blind recesses.\n")
+    App.Console.PrintMessage(f"Volume bars/labels omitted above top {P.volume_mark_top_exclusion_mm:.1f} mm zone.\n")
+
+    doc.recompute()
+
+    if Gui is not None:
+        Gui.ActiveDocument.ActiveView.viewAxonometric()
+        Gui.SendMsgToActiveView("ViewFit")
+
+    maybe_export(doc)
+    return doc
+
+def maybe_export(doc):
+    # Use getattr() so older/custom P blocks that omit export_* settings do not
+    # crash at the end of document creation. Missing settings default to no export.
+    export_step = bool(getattr(P, "export_step", False))
+    export_stl = bool(getattr(P, "export_stl", False))
+    if not (export_step or export_stl):
+        return
+
+    export_dir = getattr(
+        P,
+        "export_dir",
+        os.path.join(os.path.expanduser("~"), "PET_plant_container_exports"),
+    )
+    os.makedirs(export_dir, exist_ok=True)
+
+    export_visible_only = bool(getattr(P, "export_visible_only", False))
+    export_objects = []
+    for obj in doc.Objects:
+        if obj.TypeId != "Part::Feature":
+            continue
+        if export_visible_only and hasattr(obj, "ViewObject") and not obj.ViewObject.Visibility:
+            continue
+        export_objects.append(obj)
+
+    if export_step:
+        import Import
+        step_path = os.path.join(export_dir, "PET_plant_container_assembly.step")
+        Import.export(export_objects, step_path)
+        App.Console.PrintMessage(f"Exported STEP: {step_path}\n")
+
+    if export_stl:
+        import Mesh
+        for obj in export_objects:
+            stl_path = os.path.join(export_dir, f"{obj.Name}.stl")
+            Mesh.export([obj], stl_path)
+            App.Console.PrintMessage(f"Exported STL: {stl_path}\n")
+
+
+if __name__ == "__main__":
+    create_document()
