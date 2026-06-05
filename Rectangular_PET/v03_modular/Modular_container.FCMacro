@@ -11,9 +11,17 @@ Creates:
      and a central fill/access hole above the hollow column.
   4) Basket: one removable plant basket design carried by the dish.
 
-Revision v16:
-  - Adds optional modular side slots to the main container and separate connector keys.
-  - Default preview can generate a 2 x 2 modular main-container array.
+Revision v19:
+  - Removes the horizontal connector slots from the flat side-wall centres.
+  - Adds edge-open dovetail slots next to the vertical corner edges: four per side
+    (two corner edges x two staggered height levels).
+  - Retains the top-inserted slots/tabs. No slots are added to the bottom.
+  - Connector tabs are shorter than their slots and include a smaller recessed
+    plier head for removal without creating an external bump.
+  - Removes the former blind top-bridge locking system; modular connection is now
+    provided only by recessed removable top tabs and edge-open connector tabs.
+  - Default preview generates a 2 x 2 modular main-container array suitable for
+    checking a 16-plant layout and all connector-tab positions.
   - Single container, basket, dish openings, and existing mating rules are preserved.
 
 Revision v15:
@@ -171,8 +179,8 @@ class P:
     # Basket perforations/slots
     basket_bottom_slot_length = 3.0
     basket_bottom_slot_width = 2.0
-    basket_bottom_slot_pitch_x = 5.0
-    basket_bottom_slot_pitch_y = 4.0
+    basket_bottom_slot_pitch_x = 4.0
+    basket_bottom_slot_pitch_y = 3.0
     basket_side_slot_length = .01
     basket_side_slot_height = .01
     basket_side_slot_pitch = 20.0
@@ -195,30 +203,86 @@ class P:
     dish_handle_width = 40.0
     dish_handle_overlap = 1.0
 
-    # Modular main-container connection system.
-    # Each main container is identical/genderless: blind side slots are cut into
-    # all four outer walls, and separate sliding connector keys bridge adjacent
-    # modules. Slots do NOT cut through to the liquid wells if
-    # modular_slot_min_back_wall is respected.
+    # Parametric-box-style modular main-container connector system.
+    # All modules are identical/genderless. Curved dovetail slots are NARROW at
+    # the outside face and WIDER deeper in the wall. Separate double-sided tabs
+    # bridge two opposing slots. No connector feature is added to the bottom.
     enable_modular_side_slots = True
     modular_slot_sides = ("N", "S", "E", "W")
-    modular_slot_length_x = 32.0       # slot length on north/south faces, along X
-    modular_slot_length_y = 24.0       # slot length on east/west faces, along Y
-    modular_slot_height = 8.0          # vertical slot height
-    modular_slot_z_center = 18.0       # slot vertical center, measured from bottom
-    modular_slot_depth = 1.6           # blind recess depth into outside wall
-    modular_slot_min_back_wall = 1.2   # solid wall left behind slot before liquid cavity
-    modular_key_clearance = 0.25       # one-side clearance between key and slot
-    modular_module_gap = 1.0           # physical gap between neighbouring main modules
+    modular_slot_depth = 2.0             # blind depth into each outside wall
+    modular_slot_min_back_wall = 1.2     # sealed printable wall behind every slot
+    modular_key_clearance = 0.25         # width/height clearance between tab and slot
+    modular_fit_clearance_depth_per_side = 0.12
+    modular_module_gap = 1.0             # gap between adjacent modules; tab bridges it
+    modular_curve_steps = 11
+    modular_curve_power = 0.85
+    modular_boolean_eps = 0.10
+
+    # Vertical slots descending from the TOP edge of every side wall. These tabs
+    # are inserted vertically from above. Two slots per side avoid the existing
+    # central dish-alignment pins and provide stronger anti-separation locking.
+    enable_modular_top_vertical_slots = True
+    modular_top_slots_per_side = 2
+    modular_top_slot_offset_fraction = 0.26
+    modular_top_slot_face_width = 8.0
+    modular_top_slot_deep_width = 11.0
+    modular_top_slot_vertical_length = 24.0
+    modular_top_tab_length_clearance = 4.0
+    modular_top_tab_surface_recess = 0.8
+
+    # V18 flat-wall horizontal slots are disabled in v19. They were visually
+    # intrusive and are replaced by edge-open slots near the vertical corners.
+    enable_modular_side_horizontal_slots = False
+    modular_side_slot_face_height = 6.0       # legacy compatibility only
+    modular_side_slot_deep_height = 9.0       # legacy compatibility only
+    modular_side_slot_horizontal_length = 30.0  # legacy compatibility only
+    modular_side_slot_z_fraction = 0.64       # legacy compatibility only
+    modular_side_tab_length_clearance = 6.0   # legacy compatibility only
+
+    # Edge-open connector slots. Each side has four slots total:
+    # two vertical corner edges x two height levels. The slot opens to the corner
+    # edge, so the shorter connector tab can slide in from the edge and can later
+    # be gripped with pliers. North/south and east/west levels are staggered to
+    # prevent perpendicular connector tabs colliding at a shared module corner.
+    enable_modular_edge_slots = True
+    modular_edge_slots_per_vertical_edge = 2  # 2 per edge => 4 on each side
+    modular_edge_slot_z_fractions_ns = (0.30, 0.62)
+    modular_edge_slot_z_fractions_ew = (0.44, 0.76)
+    modular_edge_slot_insertion_length = 10.0  # distance from corner edge into side face
+    modular_edge_slot_face_height = 12.0       # narrow outside throat height
+    modular_edge_slot_deep_height = 16.0       # wider internal dovetail height
+    modular_edge_tab_length_clearance = 3.5    # unused edge space for plier access
+    modular_edge_tab_head_length = 2.0         # smaller grip within unused slot length
+    modular_edge_tab_head_height_fraction = 0.48
+
+    # Smaller-than-body recessed plier grip. The grip never extends above the top
+    # surface or outside the side envelope. It is intended for needle-nose pliers.
+    modular_tab_head_width_fraction = 0.48
+    modular_tab_head_length = 3.0
+    modular_tab_head_height = 2.0
+    modular_tab_head_gap_depth = 0.8
+    modular_tab_edge_fillet = 0.35
+
+    # Compatibility aliases used by the shared validation/wall-sizing code. The
+    # legacy shared validation uses these aliases; v19 geometry uses the detailed top/edge parameters above.
+    modular_slot_length_x = modular_side_slot_horizontal_length
+    modular_slot_length_y = modular_side_slot_horizontal_length
+    modular_slot_height = modular_side_slot_face_height
+    modular_slot_z_center = 18.0
+
+    # v17 blind top bridges/sockets are intentionally disabled.
+    enable_modular_top_locks = False
+    modular_lock_sides = ()
+    enable_modular_central_cross_lock = False
 
     # Modular preview/assembly. 2 x 2 modules = 4 main containers = 16 plant openings.
-    # Increase these later for a 3 x 3 preview. Dish/single/basket reference parts
-    # remain separately parametric and unchanged.
     show_modular_array_preview = True
     modular_array_count_x = 2
     modular_array_count_y = 2
     modular_preview_show_connector_keys = True
-    modular_preview_show_dishes = False       # avoid dish-handle collision inside arrays
+    modular_preview_show_top_lock_bridges = False
+    modular_preview_show_central_cross_lock = False
+    modular_preview_show_dishes = False
     modular_preview_show_inserts = False
     modular_preview_show_baskets = False
     modular_preview_show_reference_parts = True
@@ -355,6 +419,26 @@ def modular_slots_enabled():
     return bool(getattr(P, "enable_modular_side_slots", False))
 
 
+def modular_top_locks_enabled():
+    return bool(getattr(P, "enable_modular_top_locks", False))
+
+
+def _normalise_modular_lock_sides():
+    sides = getattr(P, "modular_lock_sides", ("N", "S", "E", "W"))
+    if isinstance(sides, str):
+        sides = sides.replace(",", " ").split() if "," in sides or " " in sides else list(sides)
+    return {str(side).strip().upper() for side in sides if str(side).strip()}
+
+
+def modular_lock_required_wall_strip():
+    if not modular_top_locks_enabled():
+        return float(P.main_min_wall_thickness)
+    required = (float(P.modular_lock_pin_inset_from_outer_edge) +
+                (float(P.modular_lock_pin_diameter) + float(P.modular_lock_pin_clearance)) / 2.0 +
+                max(0.6, float(P.modular_lock_pin_min_end_margin) * 0.25))
+    return max(float(P.main_min_wall_thickness), required)
+
+
 def modular_slot_required_wall_strip():
     if not modular_slots_enabled():
         return float(P.main_min_wall_thickness)
@@ -373,6 +457,8 @@ def required_main_wall_strip_x():
         req = max(req, internal_pin_required_wall_strip())
     if modular_slots_enabled() and ({"E", "W"} & _normalise_modular_slot_sides()):
         req = max(req, modular_slot_required_wall_strip())
+    if modular_top_locks_enabled() and ({"E", "W"} & _normalise_modular_lock_sides()):
+        req = max(req, modular_lock_required_wall_strip())
     return req
 
 
@@ -387,6 +473,8 @@ def required_main_wall_strip_y():
         req = max(req, internal_pin_required_wall_strip())
     if modular_slots_enabled() and ({"N", "S"} & _normalise_modular_slot_sides()):
         req = max(req, modular_slot_required_wall_strip())
+    if modular_top_locks_enabled() and ({"N", "S"} & _normalise_modular_lock_sides()):
+        req = max(req, modular_lock_required_wall_strip())
     return req
 
 
@@ -690,6 +778,33 @@ def validate_parameters():
             raise ValueError("modular_slot_length_x/y must be positive.")
         if int(getattr(P, "modular_array_count_x", 1)) < 1 or int(getattr(P, "modular_array_count_y", 1)) < 1:
             raise ValueError("modular_array_count_x/y must be at least 1.")
+    if modular_top_locks_enabled():
+        if P.modular_lock_pin_diameter <= 0 or P.modular_lock_pin_depth <= 0:
+            raise ValueError("modular_lock_pin_diameter/depth must be positive.")
+        if P.modular_lock_pin_clearance < 0:
+            raise ValueError("modular_lock_pin_clearance must be non-negative.")
+        if P.modular_lock_pin_depth >= effective_main_height() - P.main_bottom_thickness - 1.0:
+            raise ValueError("modular_lock_pin_depth is too deep for the main container height.")
+        if P.modular_lock_pin_inset_from_outer_edge <= 0:
+            raise ValueError("modular_lock_pin_inset_from_outer_edge must be positive.")
+        if P.modular_lock_bridge_thickness <= 0 or P.modular_lock_bridge_width <= 0:
+            raise ValueError("modular_lock_bridge_thickness/width must be positive.")
+        if P.modular_lock_bridge_land_on_module <= 0:
+            raise ValueError("modular_lock_bridge_land_on_module must be positive.")
+        if P.modular_lock_bridge_pin_engagement <= 0:
+            raise ValueError("modular_lock_bridge_pin_engagement must be positive.")
+        if P.modular_lock_bridge_pin_engagement > P.modular_lock_pin_depth + 0.25:
+            raise ValueError("Bridge pin engagement should not exceed blind socket depth.")
+        sides = _normalise_modular_lock_sides()
+        strip_x = (effective_main_outer_length() - main_bay_length()) / 2.0
+        strip_y = (effective_main_outer_width() - main_bay_width()) / 2.0
+        required = modular_lock_required_wall_strip()
+        if ({"E", "W"} & sides) and strip_x < required - 1e-6:
+            raise ValueError("X perimeter strip is too narrow for modular top-lock sockets.")
+        if ({"N", "S"} & sides) and strip_y < required - 1e-6:
+            raise ValueError("Y perimeter strip is too narrow for modular top-lock sockets.")
+        if int(getattr(P, "modular_array_count_x", 1)) < 1 or int(getattr(P, "modular_array_count_y", 1)) < 1:
+            raise ValueError("modular_array_count_x/y must be at least 1.")
     if P.enable_central_column:
         if P.central_column_diameter <= 0:
             raise ValueError("central_column_diameter must be positive.")
@@ -807,6 +922,126 @@ def modular_connector_key_shape(orientation="EW"):
     key_x = 2.0 * tongue_depth + gap
     key_y = max(0.5, float(P.modular_slot_length_y) - 2.0 * clearance)
     return box_centered(key_x, key_y, key_height, zmin, 0.0, 0.0)
+
+
+def _clamped_lock_pair_offsets(total_span):
+    """Two pin offsets along a joint, centred and clamped to printable limits."""
+    pin_d = float(P.modular_lock_pin_diameter) + float(P.modular_lock_pin_clearance)
+    end_margin = max(float(P.modular_lock_pin_min_end_margin), pin_d)
+    max_half = max(0.0, float(total_span) / 2.0 - end_margin)
+    half = min(float(P.modular_lock_pin_pair_spacing) / 2.0, max_half)
+    if half < pin_d * 0.65:
+        return [0.0]
+    return [-half, half]
+
+
+def modular_lock_socket_positions_local():
+    """Return blind top-socket centres for one main container, grouped by side.
+
+    Sockets are placed in the solid outer perimeter strips, away from the removable
+    single containers. E/W sockets use two Y offsets; N/S sockets use two X offsets.
+    """
+    if not modular_top_locks_enabled():
+        return {}
+    L = effective_main_outer_length()
+    W = effective_main_outer_width()
+    inset = float(P.modular_lock_pin_inset_from_outer_edge)
+    sides = _normalise_modular_lock_sides()
+    x_edge = max(-L / 2.0, L / 2.0 - inset)
+    y_edge = max(-W / 2.0, W / 2.0 - inset)
+    y_offsets = _clamped_lock_pair_offsets(W)
+    x_offsets = _clamped_lock_pair_offsets(L)
+    out = {}
+    if "E" in sides:
+        out["E"] = [(x_edge, y) for y in y_offsets]
+    if "W" in sides:
+        out["W"] = [(-x_edge, y) for y in y_offsets]
+    if "N" in sides:
+        out["N"] = [(x, y_edge) for x in x_offsets]
+    if "S" in sides:
+        out["S"] = [(x, -y_edge) for x in x_offsets]
+    return out
+
+
+def modular_lock_socket_cutters():
+    """Blind vertical top-socket cutters for positive-lock bridge pins."""
+    if not modular_top_locks_enabled():
+        return []
+    socket_d = float(P.modular_lock_pin_diameter) + float(P.modular_lock_pin_clearance)
+    depth = float(P.modular_lock_pin_depth)
+    top_z = effective_main_height()
+    eps = 0.08
+    cutters = []
+    for centres in modular_lock_socket_positions_local().values():
+        for x, y in centres:
+            cutters.append(cylinder_z(socket_d, depth + eps, top_z - depth, x, y))
+    return cutters
+
+
+def modular_top_lock_bridge_shape(orientation="EW"):
+    """Separate removable bridge with downward pins.
+
+    EW bridges connect west/east neighbours; NS bridges connect south/north
+    neighbours. The bridge plate sits above the main-container rim and its pins
+    drop into blind sockets. This is a positive lock, unlike the older friction key.
+    """
+    orientation = str(orientation).strip().upper()
+    gap = max(0.0, float(P.modular_module_gap))
+    land = float(P.modular_lock_bridge_land_on_module)
+    bridge_w = float(P.modular_lock_bridge_width)
+    bridge_t = float(P.modular_lock_bridge_thickness)
+    clearance = max(0.0, float(P.modular_lock_pin_clearance))
+    pin_d = max(0.2, float(P.modular_lock_pin_diameter) - clearance)
+    pin_len = max(0.5, min(float(P.modular_lock_bridge_pin_engagement),
+                           float(P.modular_lock_pin_depth) - float(P.modular_lock_bridge_pin_tip_clearance)))
+    z_plate = effective_main_height() + float(P.modular_lock_bridge_top_clearance)
+
+    shapes = []
+    if orientation == "NS":
+        # Plate spans the Y gap and lands on both neighbouring modules.
+        plate_len_y = gap + 2.0 * land
+        plate = box_centered(bridge_w, plate_len_y, bridge_t, z_plate, 0.0, 0.0)
+        shapes.append(plate)
+        x_offsets = _clamped_lock_pair_offsets(effective_main_outer_length())
+        y_pin = gap / 2.0 + float(P.modular_lock_pin_inset_from_outer_edge)
+        for x in x_offsets:
+            for y in (-y_pin, y_pin):
+                shapes.append(cylinder_z(pin_d, pin_len, z_plate - pin_len, x, y))
+        return fuse_many(shapes)
+
+    # EW bridge: plate spans the X gap and lands on both neighbouring modules.
+    plate_len_x = gap + 2.0 * land
+    plate = box_centered(plate_len_x, bridge_w, bridge_t, z_plate, 0.0, 0.0)
+    shapes.append(plate)
+    y_offsets = _clamped_lock_pair_offsets(effective_main_outer_width())
+    x_pin = gap / 2.0 + float(P.modular_lock_pin_inset_from_outer_edge)
+    for x in (-x_pin, x_pin):
+        for y in y_offsets:
+            shapes.append(cylinder_z(pin_d, pin_len, z_plate - pin_len, x, y))
+    return fuse_many(shapes)
+
+
+def modular_central_cross_lock_shape():
+    """Optional one-piece cross plate at the 2 x 2 centre.
+
+    It uses the same four neighbouring socket groups around the central junction.
+    It is useful for a 2 x 2 array that may be moved as one water-filled unit.
+    """
+    size = float(P.modular_cross_lock_plate_size)
+    t = float(P.modular_cross_lock_plate_thickness)
+    gap = max(0.0, float(P.modular_module_gap))
+    clearance = max(0.0, float(P.modular_lock_pin_clearance))
+    pin_d = max(0.2, float(P.modular_lock_pin_diameter) - clearance)
+    pin_len = max(0.5, min(float(P.modular_lock_bridge_pin_engagement),
+                           float(P.modular_lock_pin_depth) - float(P.modular_lock_bridge_pin_tip_clearance)))
+    z_plate = effective_main_height() + float(P.modular_lock_bridge_top_clearance)
+    shapes = [box_centered(size, size, t, z_plate, 0.0, 0.0)]
+    # Four pins, one near each module corner around the central array joint.
+    pin_offset = gap / 2.0 + float(P.modular_lock_pin_inset_from_outer_edge)
+    for x in (-pin_offset, pin_offset):
+        for y in (-pin_offset, pin_offset):
+            shapes.append(cylinder_z(pin_d, pin_len, z_plate - pin_len, x, y))
+    return fuse_many(shapes)
 
 
 def modular_module_pitch_x():
@@ -1331,6 +1566,462 @@ def main_volume_bar_shapes():
     return shapes
 
 
+
+# -----------------------------------------------------------------------------
+# V18/V19 parametric-box curved slot/tab modular connector overrides
+# -----------------------------------------------------------------------------
+def _v18_curve_width(t, face_value, deep_value):
+    """Smoothly widen a slot/tab from its face throat to its deeper body."""
+    t = max(0.0, min(1.0, float(t)))
+    power = max(0.10, float(P.modular_curve_power))
+    shaped = math.sin(0.5 * math.pi * t) ** power
+    return float(face_value) + (float(deep_value) - float(face_value)) * shaped
+
+
+def _v18_closed_wire(points):
+    pts = list(points)
+    if pts[0] != pts[-1]:
+        pts.append(pts[0])
+    return Part.makePolygon(pts)
+
+
+def _v18_wire_y_plane_vertical(y, tangent_center, z0, z1, tangent_width):
+    u0 = tangent_center - tangent_width / 2.0
+    u1 = tangent_center + tangent_width / 2.0
+    return _v18_closed_wire([
+        App.Vector(u0, y, z0), App.Vector(u1, y, z0),
+        App.Vector(u1, y, z1), App.Vector(u0, y, z1),
+    ])
+
+
+def _v18_wire_x_plane_vertical(x, tangent_center, z0, z1, tangent_width):
+    u0 = tangent_center - tangent_width / 2.0
+    u1 = tangent_center + tangent_width / 2.0
+    return _v18_closed_wire([
+        App.Vector(x, u0, z0), App.Vector(x, u1, z0),
+        App.Vector(x, u1, z1), App.Vector(x, u0, z1),
+    ])
+
+
+def _v18_wire_y_plane_horizontal(y, tangent_center, tangent_length, z_center, vertical_height):
+    u0 = tangent_center - tangent_length / 2.0
+    u1 = tangent_center + tangent_length / 2.0
+    z0 = z_center - vertical_height / 2.0
+    z1 = z_center + vertical_height / 2.0
+    return _v18_closed_wire([
+        App.Vector(u0, y, z0), App.Vector(u1, y, z0),
+        App.Vector(u1, y, z1), App.Vector(u0, y, z1),
+    ])
+
+
+def _v18_wire_x_plane_horizontal(x, tangent_center, tangent_length, z_center, vertical_height):
+    u0 = tangent_center - tangent_length / 2.0
+    u1 = tangent_center + tangent_length / 2.0
+    z0 = z_center - vertical_height / 2.0
+    z1 = z_center + vertical_height / 2.0
+    return _v18_closed_wire([
+        App.Vector(x, u0, z0), App.Vector(x, u1, z0),
+        App.Vector(x, u1, z1), App.Vector(x, u0, z1),
+    ])
+
+
+def _v18_side_slot_z_center():
+    low = P.main_bottom_thickness + P.modular_side_slot_deep_height / 2.0 + 2.0
+    high = effective_main_height() - P.modular_side_slot_deep_height / 2.0 - 3.0
+    requested = float(P.modular_side_slot_z_fraction) * effective_main_height()
+    return max(low, min(high, requested))
+
+
+def _v18_top_slot_offsets(side):
+    count = max(1, int(P.modular_top_slots_per_side))
+    span = effective_main_outer_length() if side in ("N", "S") else effective_main_outer_width()
+    if count == 1:
+        return [0.0]
+    max_offset = max(0.0, span / 2.0 - P.modular_top_slot_deep_width - 2.0)
+    base = min(max_offset, span * float(P.modular_top_slot_offset_fraction))
+    if count == 2:
+        return [-base, base]
+    if count <= 1 or base <= 0:
+        return [0.0]
+    return [(-base + 2.0 * base * i / float(count - 1)) for i in range(count)]
+
+
+def _v18_top_vertical_slot_cutter(side, tangent_offset):
+    """Top-open curved dovetail slot descending vertically from a side-wall top edge."""
+    L = effective_main_outer_length()
+    W = effective_main_outer_width()
+    H = effective_main_height()
+    depth = float(P.modular_slot_depth)
+    eps = float(P.modular_boolean_eps)
+    n = max(3, int(P.modular_curve_steps))
+    z0 = H - float(P.modular_top_slot_vertical_length)
+    z1 = H + eps
+    wires = []
+    for i in range(n):
+        t = i / float(n - 1)
+        width = _v18_curve_width(t, P.modular_top_slot_face_width, P.modular_top_slot_deep_width)
+        if side == "N":
+            coord = W / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_y_plane_vertical(coord, tangent_offset, z0, z1, width))
+        elif side == "S":
+            coord = -W / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_y_plane_vertical(coord, tangent_offset, z0, z1, width))
+        elif side == "E":
+            coord = L / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_x_plane_vertical(coord, tangent_offset, z0, z1, width))
+        elif side == "W":
+            coord = -L / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_x_plane_vertical(coord, tangent_offset, z0, z1, width))
+        else:
+            raise ValueError(f"Unknown modular side: {side}")
+    return Part.makeLoft(wires, True)
+
+
+def _v18_side_horizontal_slot_cutter(side, tangent_offset=0.0):
+    """Curved dovetail slot whose long axis is horizontal on the side face."""
+    L = effective_main_outer_length()
+    W = effective_main_outer_width()
+    depth = float(P.modular_slot_depth)
+    eps = float(P.modular_boolean_eps)
+    n = max(3, int(P.modular_curve_steps))
+    zc = _v18_side_slot_z_center()
+    tangent_length = float(P.modular_side_slot_horizontal_length)
+    wires = []
+    for i in range(n):
+        t = i / float(n - 1)
+        vertical_height = _v18_curve_width(t, P.modular_side_slot_face_height, P.modular_side_slot_deep_height)
+        if side == "N":
+            coord = W / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_y_plane_horizontal(coord, tangent_offset, tangent_length, zc, vertical_height))
+        elif side == "S":
+            coord = -W / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_y_plane_horizontal(coord, tangent_offset, tangent_length, zc, vertical_height))
+        elif side == "E":
+            coord = L / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_x_plane_horizontal(coord, tangent_offset, tangent_length, zc, vertical_height))
+        elif side == "W":
+            coord = -L / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_x_plane_horizontal(coord, tangent_offset, tangent_length, zc, vertical_height))
+        else:
+            raise ValueError(f"Unknown modular side: {side}")
+    return Part.makeLoft(wires, True)
+
+
+def modular_side_slot_cutters():
+    """V18 connector slots: top-vertical plus side-horizontal; never bottom slots."""
+    if not modular_slots_enabled():
+        return []
+    cutters = []
+    for side in sorted(_normalise_modular_slot_sides()):
+        if getattr(P, "enable_modular_top_vertical_slots", True):
+            for offset in _v18_top_slot_offsets(side):
+                cutters.append(_v18_top_vertical_slot_cutter(side, offset))
+        if getattr(P, "enable_modular_side_horizontal_slots", True):
+            cutters.append(_v18_side_horizontal_slot_cutter(side, 0.0))
+    return cutters
+
+
+def _v18_double_top_tab(orientation="NS", tangent_offset=0.0):
+    """One recessed top-inserted double-sided curved tab with a smaller plier head."""
+    orientation = str(orientation).upper()
+    clear = max(0.0, float(P.modular_key_clearance))
+    face_w = max(0.5, float(P.modular_top_slot_face_width) - clear)
+    deep_w = max(face_w + 0.1, float(P.modular_top_slot_deep_width) - clear)
+    half_depth = max(0.3, float(P.modular_slot_depth) - float(P.modular_fit_clearance_depth_per_side))
+    total_depth = 2.0 * half_depth + max(0.0, float(P.modular_module_gap))
+    head_h = max(0.4, float(P.modular_tab_head_height))
+    body_len = max(1.0, float(P.modular_top_slot_vertical_length) - float(P.modular_top_tab_length_clearance) - head_h)
+    n = max(3, int(P.modular_curve_steps))
+    wires = []
+    for i in range(2 * n - 1):
+        s = i / float(2 * n - 2)
+        normal = -total_depth / 2.0 + total_depth * s
+        width = _v18_curve_width(abs(s - 0.5) * 2.0, face_w, deep_w)
+        if orientation == "NS":
+            wires.append(_v18_wire_y_plane_vertical(normal, tangent_offset, 0.0, body_len, width))
+        else:
+            wires.append(_v18_wire_x_plane_vertical(normal, tangent_offset, 0.0, body_len, width))
+    body = Part.makeLoft(wires, True)
+
+    # A narrow recessed head is smaller than the body and remains below the top surface.
+    head_w = max(0.6, face_w * float(P.modular_tab_head_width_fraction))
+    head_normal = max(0.4, float(P.modular_module_gap) + float(P.modular_tab_head_gap_depth))
+    if orientation == "NS":
+        head = box_centered(head_w, head_normal, head_h, body_len, tangent_offset, 0.0)
+    else:
+        head = box_centered(head_normal, head_w, head_h, body_len, 0.0, tangent_offset)
+    shape = fuse_many([body, head])
+    shape = safe_fillet(shape, float(P.modular_tab_edge_fillet))
+    z_place = effective_main_height() - float(P.modular_top_tab_surface_recess) - (body_len + head_h)
+    moved = shape.copy()
+    moved.translate(App.Vector(0.0, 0.0, z_place))
+    return moved
+
+
+def _v18_double_side_tab(orientation="NS"):
+    """One horizontal double-sided curved tab with a small recessed plier grip."""
+    orientation = str(orientation).upper()
+    clear = max(0.0, float(P.modular_key_clearance))
+    face_h = max(0.5, float(P.modular_side_slot_face_height) - clear)
+    deep_h = max(face_h + 0.1, float(P.modular_side_slot_deep_height) - clear)
+    half_depth = max(0.3, float(P.modular_slot_depth) - float(P.modular_fit_clearance_depth_per_side))
+    total_depth = 2.0 * half_depth + max(0.0, float(P.modular_module_gap))
+    body_len = max(1.0, float(P.modular_side_slot_horizontal_length) - float(P.modular_side_tab_length_clearance))
+    n = max(3, int(P.modular_curve_steps))
+    wires = []
+    for i in range(2 * n - 1):
+        s = i / float(2 * n - 2)
+        normal = -total_depth / 2.0 + total_depth * s
+        height = _v18_curve_width(abs(s - 0.5) * 2.0, face_h, deep_h)
+        if orientation == "NS":
+            wires.append(_v18_wire_y_plane_horizontal(normal, 0.0, body_len, 0.0, height))
+        else:
+            wires.append(_v18_wire_x_plane_horizontal(normal, 0.0, body_len, 0.0, height))
+    body = Part.makeLoft(wires, True)
+
+    # Smaller plier heads extend into the intentionally unused slot length at
+    # both ends. They remain inside the slot envelope, so they create no bump,
+    # but an accessible end can be grasped with needle-nose pliers.
+    spare_each_end = max(0.4, float(P.modular_side_tab_length_clearance) / 2.0)
+    grip_tangent = max(0.5, min(float(P.modular_tab_head_length), spare_each_end * 0.85))
+    grip_normal = max(0.4, float(P.modular_module_gap) + float(P.modular_tab_head_gap_depth))
+    grip_height = max(0.5, face_h * float(P.modular_tab_head_width_fraction))
+    grip_offset = body_len / 2.0 + grip_tangent / 2.0
+    if orientation == "NS":
+        grip_a = box_centered(grip_tangent, grip_normal, grip_height, -grip_height / 2.0, -grip_offset, 0.0)
+        grip_b = box_centered(grip_tangent, grip_normal, grip_height, -grip_height / 2.0,  grip_offset, 0.0)
+    else:
+        grip_a = box_centered(grip_normal, grip_tangent, grip_height, -grip_height / 2.0, 0.0, -grip_offset)
+        grip_b = box_centered(grip_normal, grip_tangent, grip_height, -grip_height / 2.0, 0.0,  grip_offset)
+    shape = fuse_many([body, grip_a, grip_b])
+    shape = safe_fillet(shape, float(P.modular_tab_edge_fillet))
+    moved = shape.copy()
+    moved.translate(App.Vector(0.0, 0.0, _v18_side_slot_z_center()))
+    return moved
+
+
+def modular_connector_key_shape(orientation="EW"):
+    """Return the complete recessed connector set for one neighbouring-module joint.
+
+    The compound contains two vertical top tabs plus one horizontal side tab.
+    It has no blind top bridge and no protruding external handle.
+    """
+    orientation = str(orientation).strip().upper()
+    tangent_side = "N" if orientation == "NS" else "E"
+    shapes = []
+    if getattr(P, "enable_modular_top_vertical_slots", True):
+        for offset in _v18_top_slot_offsets(tangent_side):
+            shapes.append(_v18_double_top_tab(orientation, offset))
+    if getattr(P, "enable_modular_side_horizontal_slots", True):
+        shapes.append(_v18_double_side_tab(orientation))
+    return Part.makeCompound(shapes)
+
+
+# Add v18-specific checks while preserving all earlier validation.
+_validate_parameters_v17 = validate_parameters
+
+def validate_parameters():
+    _validate_parameters_v17()
+    if not modular_slots_enabled():
+        return
+    if P.modular_top_slot_deep_width <= P.modular_top_slot_face_width:
+        raise ValueError("modular_top_slot_deep_width must exceed modular_top_slot_face_width for dovetail locking.")
+    if P.modular_side_slot_deep_height <= P.modular_side_slot_face_height:
+        raise ValueError("modular_side_slot_deep_height must exceed modular_side_slot_face_height for dovetail locking.")
+    if P.modular_top_slot_vertical_length <= P.modular_top_tab_length_clearance + P.modular_tab_head_height + 1.0:
+        raise ValueError("Top slot must be longer than the recessed top tab plus its plier head.")
+    if P.modular_side_slot_horizontal_length <= P.modular_side_tab_length_clearance + 1.0:
+        raise ValueError("Horizontal side slot must be longer than its recessed tab.")
+    if P.modular_slot_depth + P.modular_slot_min_back_wall > min(required_main_wall_strip_x(), required_main_wall_strip_y()) + 1e-6:
+        raise ValueError("Modular slot depth/back-wall requirement exceeds the generated perimeter wall strip.")
+    if P.modular_curve_steps < 3:
+        raise ValueError("modular_curve_steps must be at least 3.")
+
+
+# -----------------------------------------------------------------------------
+# V19 edge-open modular connector overrides
+# -----------------------------------------------------------------------------
+def _v19_edge_slot_z_centres(side):
+    """Return staggered side-edge slot heights for one side orientation."""
+    side = str(side).upper()
+    if side in ("N", "S"):
+        fractions = tuple(getattr(P, "modular_edge_slot_z_fractions_ns", (0.30, 0.62)))
+    else:
+        fractions = tuple(getattr(P, "modular_edge_slot_z_fractions_ew", (0.44, 0.76)))
+    requested_count = max(1, int(getattr(P, "modular_edge_slots_per_vertical_edge", 2)))
+    if len(fractions) < requested_count:
+        # Parametric fallback: evenly distribute requested levels while avoiding
+        # the closed bottom and top rim.
+        fractions = tuple((i + 1.0) / (requested_count + 1.0) for i in range(requested_count))
+    H = effective_main_height()
+    half_h = float(P.modular_edge_slot_deep_height) / 2.0
+    z_min = float(P.main_bottom_thickness) + half_h + 2.0
+    z_max = H - half_h - max(4.0, float(P.main_top_bridge_height))
+    return [max(z_min, min(z_max, float(fractions[i]) * H)) for i in range(requested_count)]
+
+
+def _v19_edge_tangent_center(side, edge_sign):
+    """Centre an edge-open slot so one end reaches the selected vertical corner."""
+    side = str(side).upper()
+    edge_sign = 1.0 if float(edge_sign) >= 0 else -1.0
+    span = effective_main_outer_length() if side in ("N", "S") else effective_main_outer_width()
+    length = float(P.modular_edge_slot_insertion_length)
+    eps = float(P.modular_boolean_eps)
+    return edge_sign * (span / 2.0 - length / 2.0 + eps / 2.0)
+
+
+def _v19_edge_vertical_slot_cutter(side, edge_sign, z_center):
+    """Curved dovetail slot on a side face, open to a vertical corner edge.
+
+    Its visible footprint is tall and narrow, matching the user's blue-marked
+    edge position. The slot reaches the corner edge so the connector tab slides
+    in horizontally from that edge rather than projecting from the flat wall.
+    """
+    L = effective_main_outer_length()
+    W = effective_main_outer_width()
+    depth = float(P.modular_slot_depth)
+    eps = float(P.modular_boolean_eps)
+    n = max(3, int(P.modular_curve_steps))
+    tangent_center = _v19_edge_tangent_center(side, edge_sign)
+    tangent_length = float(P.modular_edge_slot_insertion_length) + eps
+    wires = []
+    for i in range(n):
+        t = i / float(n - 1)
+        vertical_height = _v18_curve_width(
+            t,
+            P.modular_edge_slot_face_height,
+            P.modular_edge_slot_deep_height,
+        )
+        if side == "N":
+            coord = W / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_y_plane_horizontal(coord, tangent_center, tangent_length,
+                                                       z_center, vertical_height))
+        elif side == "S":
+            coord = -W / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_y_plane_horizontal(coord, tangent_center, tangent_length,
+                                                       z_center, vertical_height))
+        elif side == "E":
+            coord = L / 2.0 + eps - (depth + eps) * t
+            wires.append(_v18_wire_x_plane_horizontal(coord, tangent_center, tangent_length,
+                                                       z_center, vertical_height))
+        elif side == "W":
+            coord = -L / 2.0 - eps + (depth + eps) * t
+            wires.append(_v18_wire_x_plane_horizontal(coord, tangent_center, tangent_length,
+                                                       z_center, vertical_height))
+        else:
+            raise ValueError(f"Unknown modular side: {side}")
+    return Part.makeLoft(wires, True)
+
+
+def modular_side_slot_cutters():
+    """V19 slots: retain top slots, remove flat-wall slots, add edge-open slots.
+
+    No connector feature is added to the bottom. Every side has four edge slots:
+    two vertical edges multiplied by two staggered height levels.
+    """
+    if not modular_slots_enabled():
+        return []
+    cutters = []
+    for side in sorted(_normalise_modular_slot_sides()):
+        if getattr(P, "enable_modular_top_vertical_slots", True):
+            for offset in _v18_top_slot_offsets(side):
+                cutters.append(_v18_top_vertical_slot_cutter(side, offset))
+        if getattr(P, "enable_modular_edge_slots", True):
+            for edge_sign in (-1.0, 1.0):
+                for zc in _v19_edge_slot_z_centres(side):
+                    cutters.append(_v19_edge_vertical_slot_cutter(side, edge_sign, zc))
+    return cutters
+
+
+def _v19_double_edge_tab(orientation="EW", edge_sign=1.0, z_center=0.0):
+    """Double-sided connector tab for one pair of opposing edge-open slots.
+
+    The main body is shorter than the slot. A smaller head occupies only part of
+    the unused length near the edge, leaving a recess where needle-nose pliers can
+    grip it for disassembly. Nothing projects beyond the module side envelope.
+    """
+    orientation = str(orientation).upper()
+    edge_sign = 1.0 if float(edge_sign) >= 0 else -1.0
+    clear = max(0.0, float(P.modular_key_clearance))
+    face_h = max(0.5, float(P.modular_edge_slot_face_height) - clear)
+    deep_h = max(face_h + 0.1, float(P.modular_edge_slot_deep_height) - clear)
+    half_depth = max(0.3, float(P.modular_slot_depth) - float(P.modular_fit_clearance_depth_per_side))
+    total_depth = 2.0 * half_depth + max(0.0, float(P.modular_module_gap))
+    slot_len = float(P.modular_edge_slot_insertion_length)
+    spare = max(0.8, float(P.modular_edge_tab_length_clearance))
+    body_len = max(1.0, slot_len - spare)
+    span = effective_main_outer_width() if orientation == "EW" else effective_main_outer_length()
+
+    # Put the body against the inward end of the edge-open slot, leaving all
+    # removable/grip clearance at the outside corner edge.
+    tangent_center = edge_sign * (span / 2.0 - spare - body_len / 2.0)
+    n = max(3, int(P.modular_curve_steps))
+    wires = []
+    for i in range(2 * n - 1):
+        s = i / float(2 * n - 2)
+        normal = -total_depth / 2.0 + total_depth * s
+        height = _v18_curve_width(abs(s - 0.5) * 2.0, face_h, deep_h)
+        if orientation == "EW":
+            # Across an E/W joint: normal X, tangent Y.
+            wires.append(_v18_wire_x_plane_horizontal(normal, tangent_center, body_len,
+                                                       z_center, height))
+        else:
+            # Across an N/S joint: normal Y, tangent X.
+            wires.append(_v18_wire_y_plane_horizontal(normal, tangent_center, body_len,
+                                                       z_center, height))
+    body = Part.makeLoft(wires, True)
+
+    head_len = max(0.5, min(float(P.modular_edge_tab_head_length), spare * 0.70))
+    head_height = max(0.5, face_h * float(P.modular_edge_tab_head_height_fraction))
+    head_normal = max(0.4, float(P.modular_module_gap) + float(P.modular_tab_head_gap_depth))
+    # Head starts where the body ends and points toward the accessible edge.
+    head_tangent_center = edge_sign * (span / 2.0 - spare + head_len / 2.0)
+    if orientation == "EW":
+        head = box_centered(head_normal, head_len, head_height,
+                            z_center - head_height / 2.0, 0.0, head_tangent_center)
+    else:
+        head = box_centered(head_len, head_normal, head_height,
+                            z_center - head_height / 2.0, head_tangent_center, 0.0)
+    return safe_fillet(fuse_many([body, head]), float(P.modular_tab_edge_fillet))
+
+
+def modular_connector_key_shape(orientation="EW"):
+    """Complete v19 connector set for one neighbouring-module joint.
+
+    It contains the retained top-inserted tabs plus four edge tabs: two endpoint
+    edges x two staggered height levels. The removed flat-wall horizontal tab is
+    not generated.
+    """
+    orientation = str(orientation).strip().upper()
+    shapes = []
+    tangent_side = "E" if orientation == "EW" else "N"
+    if getattr(P, "enable_modular_top_vertical_slots", True):
+        for offset in _v18_top_slot_offsets(tangent_side):
+            shapes.append(_v18_double_top_tab(orientation, offset))
+    if getattr(P, "enable_modular_edge_slots", True):
+        for edge_sign in (-1.0, 1.0):
+            for zc in _v19_edge_slot_z_centres(tangent_side):
+                shapes.append(_v19_double_edge_tab(orientation, edge_sign, zc))
+    return Part.makeCompound(shapes)
+
+
+_validate_parameters_v19_base = validate_parameters
+
+def validate_parameters():
+    _validate_parameters_v19_base()
+    if not modular_slots_enabled() or not getattr(P, "enable_modular_edge_slots", True):
+        return
+    if int(P.modular_edge_slots_per_vertical_edge) < 1:
+        raise ValueError("modular_edge_slots_per_vertical_edge must be at least 1.")
+    if P.modular_edge_slot_insertion_length <= P.modular_edge_tab_length_clearance + 1.0:
+        raise ValueError("Edge slot insertion length must exceed tab clearance plus 1 mm.")
+    if P.modular_edge_slot_deep_height <= P.modular_edge_slot_face_height:
+        raise ValueError("modular_edge_slot_deep_height must exceed face height for dovetail locking.")
+    if P.modular_edge_tab_head_length >= P.modular_edge_tab_length_clearance:
+        raise ValueError("Edge-tab head must be shorter than the unused slot length for plier access.")
+    if P.modular_edge_slot_insertion_length >= min(effective_main_outer_length(), effective_main_outer_width()) / 2.0:
+        raise ValueError("Edge slot insertion length is too large for the main-container footprint.")
+
 # -----------------------------------------------------------------------------
 # Part builders
 # -----------------------------------------------------------------------------
@@ -1373,8 +2064,11 @@ def make_main_container():
                                     0.0, 0.0))
 
     # Blind modular side slots are outside-wall recesses only; validation ensures
-    # a sealed back wall remains before the liquid cavity.
+    # a sealed back wall remains before the liquid cavity. They are alignment aids only.
     cutters.extend(modular_side_slot_cutters())
+
+    # V17 bridge sockets are disabled in v18; no blind top-lock bridge is used.
+    cutters.extend(modular_lock_socket_cutters())
 
     shape = cut_many(base, cutters)
 
@@ -1567,29 +2261,53 @@ def create_document():
                                         x + ox, y + oy, basket_z,
                                         color=(0.95, 0.75, 0.35), transparency=15)
 
-        if modular_slots_enabled() and getattr(P, "modular_preview_show_connector_keys", True):
-            nx = max(1, int(getattr(P, "modular_array_count_x", 1)))
-            ny = max(1, int(getattr(P, "modular_array_count_y", 1)))
-            px = modular_module_pitch_x()
-            py = modular_module_pitch_y()
-            x0 = -(nx - 1) * px / 2.0
-            y0 = -(ny - 1) * py / 2.0
+        nx = max(1, int(getattr(P, "modular_array_count_x", 1)))
+        ny = max(1, int(getattr(P, "modular_array_count_y", 1)))
+        px = modular_module_pitch_x()
+        py = modular_module_pitch_y()
+        x0 = -(nx - 1) * px / 2.0
+        y0 = -(ny - 1) * py / 2.0
+
+        if modular_slots_enabled() and getattr(P, "modular_preview_show_connector_keys", False):
+            # V19 recessed curved-dovetail connector sets: retained top tabs
+            # plus four edge-open tabs per neighbouring-module joint.
             ew_key = modular_connector_key_shape("EW")
             ns_key = modular_connector_key_shape("NS")
-            # East-west keys: one between horizontal neighbours in each row.
             for j in range(ny):
                 y = y0 + j * py
                 for i in range(nx - 1):
                     x = x0 + (i + 0.5) * px
-                    clone_shape_feature(doc, f"Modular_Key_EW_{i+1}_{j+1}", ew_key, x, y, 0.0,
-                                        color=(0.15, 0.15, 0.15), transparency=0)
-            # North-south keys: one between vertical neighbours in each column.
+                    clone_shape_feature(doc, f"Modular_Connector_Set_EW_{i+1}_{j+1}", ew_key, x, y, 0.0,
+                                        color=(0.20, 0.20, 0.20), transparency=0)
             for j in range(ny - 1):
                 y = y0 + (j + 0.5) * py
                 for i in range(nx):
                     x = x0 + i * px
-                    clone_shape_feature(doc, f"Modular_Key_NS_{i+1}_{j+1}", ns_key, x, y, 0.0,
-                                        color=(0.15, 0.15, 0.15), transparency=0)
+                    clone_shape_feature(doc, f"Modular_Connector_Set_NS_{i+1}_{j+1}", ns_key, x, y, 0.0,
+                                        color=(0.20, 0.20, 0.20), transparency=0)
+
+        if modular_top_locks_enabled() and getattr(P, "modular_preview_show_top_lock_bridges", True):
+            ew_bridge = modular_top_lock_bridge_shape("EW")
+            ns_bridge = modular_top_lock_bridge_shape("NS")
+            # East-west top locks: one bridge between horizontal neighbours in each row.
+            for j in range(ny):
+                y = y0 + j * py
+                for i in range(nx - 1):
+                    x = x0 + (i + 0.5) * px
+                    clone_shape_feature(doc, f"Top_Lock_Bridge_EW_{i+1}_{j+1}", ew_bridge, x, y, 0.0,
+                                        color=(0.05, 0.05, 0.05), transparency=0)
+            # North-south top locks: one bridge between vertical neighbours in each column.
+            for j in range(ny - 1):
+                y = y0 + (j + 0.5) * py
+                for i in range(nx):
+                    x = x0 + i * px
+                    clone_shape_feature(doc, f"Top_Lock_Bridge_NS_{i+1}_{j+1}", ns_bridge, x, y, 0.0,
+                                        color=(0.05, 0.05, 0.05), transparency=0)
+
+            if (getattr(P, "enable_modular_central_cross_lock", False) and
+                    getattr(P, "modular_preview_show_central_cross_lock", True) and nx == 2 and ny == 2):
+                clone_shape_feature(doc, "Top_Central_Cross_Lock", modular_central_cross_lock_shape(),
+                                    0.0, 0.0, 0.0, color=(0.02, 0.02, 0.02), transparency=0)
 
         if getattr(P, "modular_preview_show_reference_parts", True):
             # Place one representative dish/single/basket beside the array so their
@@ -1605,13 +2323,24 @@ def create_document():
             clone_shape_feature(doc, "Reference_Basket_A1", make_basket("A1"),
                                 x_ref, effective_dish_outer_width() / 2.0 + 20.0, 0.0,
                                 color=(0.95, 0.75, 0.35), transparency=5)
-            if modular_slots_enabled():
-                clone_shape_feature(doc, "Reference_Modular_Key_EW", modular_connector_key_shape("EW"),
+            if modular_slots_enabled() and getattr(P, "modular_preview_show_connector_keys", False):
+                clone_shape_feature(doc, "Reference_Modular_Connector_Set_EW", modular_connector_key_shape("EW"),
                                     x_ref, effective_dish_outer_width() / 2.0 + 45.0, 0.0,
-                                    color=(0.15, 0.15, 0.15), transparency=0)
-                clone_shape_feature(doc, "Reference_Modular_Key_NS", modular_connector_key_shape("NS"),
+                                    color=(0.20, 0.20, 0.20), transparency=0)
+                clone_shape_feature(doc, "Reference_Modular_Connector_Set_NS", modular_connector_key_shape("NS"),
                                     x_ref, effective_dish_outer_width() / 2.0 + 60.0, 0.0,
-                                    color=(0.15, 0.15, 0.15), transparency=0)
+                                    color=(0.20, 0.20, 0.20), transparency=0)
+            if modular_top_locks_enabled():
+                clone_shape_feature(doc, "Reference_Top_Lock_Bridge_EW", modular_top_lock_bridge_shape("EW"),
+                                    x_ref, effective_dish_outer_width() / 2.0 + 45.0, 0.0,
+                                    color=(0.05, 0.05, 0.05), transparency=0)
+                clone_shape_feature(doc, "Reference_Top_Lock_Bridge_NS", modular_top_lock_bridge_shape("NS"),
+                                    x_ref, effective_dish_outer_width() / 2.0 + 65.0, 0.0,
+                                    color=(0.05, 0.05, 0.05), transparency=0)
+                if getattr(P, "enable_modular_central_cross_lock", False):
+                    clone_shape_feature(doc, "Reference_Top_Central_Cross_Lock", modular_central_cross_lock_shape(),
+                                        x_ref, effective_dish_outer_width() / 2.0 + 90.0, 0.0,
+                                        color=(0.02, 0.02, 0.02), transparency=0)
 
     else:
         add_feature(doc, "Main_Container", main_shape, color=(0.78, 0.78, 0.78), transparency=35)
@@ -1684,7 +2413,7 @@ def create_document():
         total_modules = max(1, int(P.modular_array_count_x)) * max(1, int(P.modular_array_count_y))
         App.Console.PrintMessage(f"Modular preview: {P.modular_array_count_x} x {P.modular_array_count_y} modules = {total_modules * 4} plant openings\n")
         if modular_slots_enabled():
-            App.Console.PrintMessage("Modular connector keys are separate removable parts; side slots are blind recesses.\n")
+            App.Console.PrintMessage("Modular connector tabs are separate removable parts; flat-wall slots are removed and edge slots are blind recesses.\n")
     App.Console.PrintMessage(f"Volume bars/labels omitted above top {P.volume_mark_top_exclusion_mm:.1f} mm zone.\n")
 
     doc.recompute()
