@@ -88,7 +88,7 @@ except Exception:  # FreeCADCmd/headless
 # -----------------------------------------------------------------------------
 class P:
     # General fabrication tolerances
-    fit_clearance_xy = 0.4       # one-side clearance for sliding fits, mm
+    fit_clearance_xy = 1.25       # one-side clearance for sliding fits, mm
     z_clearance = 0.20            # vertical clearance between stacked parts, mm
     fillet_radius = 0         # set 0 to disable simple all-edge fillets
 
@@ -145,9 +145,9 @@ class P:
     auto_fit_dish_outer_xy_to_layout = True
     dish_outer_overhang = 2.0
     dish_min_edge_margin = 2.0     # minimum dish material outside window/recess features, mm
-    dish_thickness = 2
-    dish_basket_lip_recess_depth = 0.45
-    dish_basket_lip_recess_clearance = 0.50
+    dish_thickness = 2.4
+    dish_basket_lip_recess_depth = 1.2
+    dish_basket_lip_recess_clearance = 1.2
     dish_central_fill_hole_diameter = 4.0  # gives top access to the hollow main-column bore
 
     # Basket: lower body passes through dish window; top lip rests on dish and is carried by it.
@@ -179,8 +179,8 @@ class P:
     basket_bottom = 1.0
     basket_lip_length = 56.0       # used only if derive_basket_from_single=False
     basket_lip_width = 25.0        # used only if derive_basket_from_single=False
-    basket_lip_overhang_x = 2.   # each side; used when derive_basket_from_single=True
-    basket_lip_overhang_y = 2.   # each side; used when derive_basket_from_single=True
+    basket_lip_overhang_x = 4.5  # each side; used when derive_basket_from_single=True
+    basket_lip_overhang_y = 4.5   # each side; used when derive_basket_from_single=True
     basket_lip_thickness = 1.0
     basket_corner_fillet = 0.9
 
@@ -223,8 +223,8 @@ class P:
     modular_fit_clearance_depth_per_side = 0.12
     modular_module_gap = 1.0             # gap between adjacent modules; tab bridges it
     modular_curve_steps = 11
-    modular_curve_power = 0.85
-    modular_boolean_eps = 0.10
+    modular_curve_power = 1.4
+    modular_boolean_eps = .2
 
     # Vertical slots descending from the TOP edge of every side wall. These tabs
     # are inserted vertically from above. Two slots per side avoid the existing
@@ -232,8 +232,8 @@ class P:
     enable_modular_top_vertical_slots = True
     modular_top_slots_per_side = 2
     modular_top_slot_offset_fraction = 0.26
-    modular_top_slot_face_width = 8.0
-    modular_top_slot_deep_width = 11.0
+    modular_top_slot_face_width = 7.0
+    modular_top_slot_deep_width = 12.0
     modular_top_slot_vertical_length = 24.0
     modular_top_tab_length_clearance = 4.0
     modular_top_tab_surface_recess = 0.8
@@ -256,7 +256,7 @@ class P:
     modular_edge_slots_per_vertical_edge = 2  # 2 per edge => 4 on each side
     modular_edge_slot_z_fractions_ns = (0.30, 0.62)
     modular_edge_slot_z_fractions_ew = (0.44, 0.76)
-    modular_edge_slot_insertion_length = 10.0  # distance from corner edge into side face
+    modular_edge_slot_insertion_length = 20.0  # distance from corner edge into side face
     modular_edge_slot_face_height = 12.0       # narrow outside throat height
     modular_edge_slot_deep_height = 16.0       # wider internal dovetail height
     modular_edge_tab_length_clearance = 3.5    # unused edge space for plier access
@@ -287,7 +287,7 @@ class P:
     # one Dish, one Single_Container_A1, and one Basket_A1. The main container still
     # contains all top and vertical-edge modular slots. No neighbour modules or
     # connector-tab sets are displayed unless the array preview is enabled below.
-    show_modular_array_preview = False
+    show_modular_array_preview = True
 
     # Optional future array preview. Set show_modular_array_preview=True and change
     # these counts when you want to inspect how several identical modules connect.
