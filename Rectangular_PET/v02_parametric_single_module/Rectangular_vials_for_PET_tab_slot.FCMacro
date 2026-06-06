@@ -11,6 +11,27 @@ Creates:
      and a central fill/access hole above the hollow column.
   4) Basket: one removable plant basket design carried by the dish.
 
+Revision v22 — recess-depth fix and clearer insert seat:
+  - main_single_container_recess_depth is no longer silently clamped to
+    single_top_flange_thickness. If the value is too deep for the preserved top
+    rib, validation raises a clear error instead of making the model appear
+    unchanged.
+  - The dish Z placement is protected from dropping below the main-container rim
+    when a deep recess is used.
+  - The macro prints the effective recess depth so parameter changes are visible.
+
+Revision v21 — explicit opening margins, optional centre column, and insert-seat recess:
+  - Adds explicit main_opening_side_margin_x/y parameters; default 10 mm.
+    These define the distance from the outermost main openings to the main-container
+    outside walls. The effective margin auto-increases only if connector/seat geometry
+    requires more material.
+  - Adds enable_central_column as a true/false switch for creating the physical
+    middle irrigation column. The dish central fill hole can remain present even
+    when the physical column is disabled.
+  - Adds a shallow top seat/counterbore around each main opening so the removable
+    single-container flange rests in a recess/ledge instead of relying only on
+    the flat top surface.
+
 Revision v20 — single-module default:
   - Returns the default macro view to one modular Main_Container, one Dish, one
     Single_Container_A1, and one Basket_A1.
@@ -108,6 +129,22 @@ class P:
     main_bottom_thickness = 2.0   # closed bottom; no cut reaches below this plane
     main_min_wall_thickness = 3.5 # minimum outside perimeter wall; extra space stays as wall
 
+    # Explicit outer margin from the OUTERMOST main openings to the outside
+    # walls of the main container. These make the opening-to-side distance easy
+    # to control independently in X and Y. The effective generated margin is
+    # max(these values, any margin required for slots/pins/recess ledges).
+    main_opening_side_margin_x = 10.0
+    main_opening_side_margin_y = 10.0
+
+    # Optional top seat/counterbore around each main opening. The through-opening
+    # remains sized for the single-container body; this shallow larger recess
+    # catches the single-container top flange so the insert cannot fall into the
+    # main container.
+    enable_main_single_container_recess = True
+    main_single_container_recess_depth = 1.80  # visible counterbore depth; v22 does not silently clamp this
+    main_single_container_recess_clearance_xy = 0.6
+    main_single_container_recess_min_land = 1.00
+
     # Four top openings. By default these are derived from the single-container body.
     # With the defaults below, each opening is single_body + 2*fit_clearance_xy.
     opening_gap_x = 15             # top bridge/rib between left/right openings
@@ -131,7 +168,7 @@ class P:
     single_wall = 1.50
     single_bottom = 2.00
     single_top_flange_overhang = 2.00
-    single_top_flange_thickness = 2.00
+    single_top_flange_thickness = 1.6
     single_corner_fillet = 0.0
 
     # Dish/top carrier plate
@@ -148,6 +185,9 @@ class P:
     dish_thickness = 2.4
     dish_basket_lip_recess_depth = 1.2
     dish_basket_lip_recess_clearance = 1.2
+    # Keep this enabled if you want the dish to retain a centre fill/access hole
+    # even when enable_central_column=False in the main container.
+    enable_dish_central_fill_hole = True
     dish_central_fill_hole_diameter = 4.0  # gives top access to the hollow main-column bore
 
     # Basket: lower body passes through dish window; top lip rests on dish and is carried by it.
@@ -287,7 +327,7 @@ class P:
     # one Dish, one Single_Container_A1, and one Basket_A1. The main container still
     # contains all top and vertical-edge modular slots. No neighbour modules or
     # connector-tab sets are displayed unless the array preview is enabled below.
-    show_modular_array_preview = True
+    show_modular_array_preview = False
 
     # Optional future array preview. Set show_modular_array_preview=True and change
     # these counts when you want to inspect how several identical modules connect.
@@ -332,7 +372,9 @@ class P:
     volume_label_stroke_width = 0.28
 
     # Central hollow irrigation/distribution column at the junction of the four openings.
-    enable_central_column = True
+    # Set enable_central_column=False to remove the physical middle column from the
+    # main container. The dish centre fill hole is controlled separately above.
+    enable_central_column = False
     central_column_diameter = 6.0
     central_column_clearance_to_openings = 0.30  # effective opening gaps grow if required
     central_column_cutout_clearance = 0.20       # remove square junction material above bottom, then add column
@@ -365,15 +407,23 @@ def main_opening_width():
     return P.single_body_width + 2.0 * P.fit_clearance_xy
 
 
+def physical_central_column_enabled():
+    return bool(getattr(P, "enable_central_column", True))
+
+
+def dish_central_fill_hole_enabled():
+    return bool(getattr(P, "enable_dish_central_fill_hole", True))
+
+
 def effective_opening_gap_x():
-    if P.enable_central_column:
+    if physical_central_column_enabled():
         return max(P.opening_gap_x,
                    P.central_column_diameter + 2.0 * P.central_column_clearance_to_openings)
     return P.opening_gap_x
 
 
 def effective_opening_gap_y():
-    if P.enable_central_column:
+    if physical_central_column_enabled():
         return max(P.opening_gap_y,
                    P.central_column_diameter + 2.0 * P.central_column_clearance_to_openings)
     return P.opening_gap_y
@@ -412,6 +462,91 @@ def main_bay_length():
 def main_bay_width():
     """Overall span of the 2 x 2 opening group, including the top bridges."""
     return 2.0 * main_opening_width() + effective_opening_gap_y()
+
+
+def single_container_recess_enabled():
+    return bool(getattr(P, "enable_main_single_container_recess", True))
+
+
+def main_single_container_recess_clearance_xy():
+    return max(0.0, float(getattr(P, "main_single_container_recess_clearance_xy", 0.30)))
+
+
+def main_single_container_recess_depth():
+    """Depth of the shallow flange seat/counterbore in the main container.
+
+    v21 silently clamped this to single_top_flange_thickness. That made larger
+    user values appear to do nothing. In v22 the requested value is returned
+    directly and validate_parameters() gives a clear error only if it is too
+    deep for the preserved top rib/bridge geometry.
+    """
+    if not single_container_recess_enabled():
+        return 0.0
+    return max(0.0, float(getattr(P, "main_single_container_recess_depth", 0.0)))
+
+
+def main_single_container_recess_length():
+    return single_flange_length() + 2.0 * main_single_container_recess_clearance_xy()
+
+
+def main_single_container_recess_width():
+    return single_flange_width() + 2.0 * main_single_container_recess_clearance_xy()
+
+
+def main_single_container_recess_overhang_x():
+    if not single_container_recess_enabled():
+        return 0.0
+    return max(0.0, (main_single_container_recess_length() - main_opening_length()) / 2.0)
+
+
+def main_single_container_recess_overhang_y():
+    if not single_container_recess_enabled():
+        return 0.0
+    return max(0.0, (main_single_container_recess_width() - main_opening_width()) / 2.0)
+
+
+def main_recess_min_land():
+    return max(0.0, float(getattr(P, "main_single_container_recess_min_land", 1.0)))
+
+
+def required_seat_margin_x():
+    return main_single_container_recess_overhang_x() + main_recess_min_land()
+
+
+def required_seat_margin_y():
+    return main_single_container_recess_overhang_y() + main_recess_min_land()
+
+
+def effective_main_opening_side_margin_x():
+    return max(float(getattr(P, "main_opening_side_margin_x", P.main_min_wall_thickness)),
+               required_main_wall_strip_x(),
+               required_seat_margin_x())
+
+
+def effective_main_opening_side_margin_y():
+    return max(float(getattr(P, "main_opening_side_margin_y", P.main_min_wall_thickness)),
+               required_main_wall_strip_y(),
+               required_seat_margin_y())
+
+
+def main_insert_z():
+    """Assembly Z position for single-container body when flange sits in the main recess."""
+    return effective_main_height() - P.single_depth - main_single_container_recess_depth()
+
+
+def assembled_single_container_top_z():
+    return main_insert_z() + P.single_depth + P.single_top_flange_thickness
+
+
+def main_dish_support_z():
+    """Z level used to place the dish.
+
+    Normally the dish follows the top of the inserted single-container flange.
+    If a user sets the main recess deeper than the flange thickness, the flange
+    top drops below the main-container rim; in that case the dish must not drop
+    into the main rim, so use the higher of the two support levels.
+    """
+    return max(effective_main_height(), assembled_single_container_top_z())
 
 
 def internal_pin_required_wall_strip():
@@ -493,14 +628,14 @@ def required_main_wall_strip_y():
 
 
 def effective_main_outer_length():
-    needed = main_bay_length() + 2.0 * required_main_wall_strip_x()
+    needed = main_bay_length() + 2.0 * effective_main_opening_side_margin_x()
     if getattr(P, "auto_fit_main_outer_xy_to_single", True):
         return needed
     return max(P.main_outer_length, needed)
 
 
 def effective_main_outer_width():
-    needed = main_bay_width() + 2.0 * required_main_wall_strip_y()
+    needed = main_bay_width() + 2.0 * effective_main_opening_side_margin_y()
     if getattr(P, "auto_fit_main_outer_xy_to_single", True):
         return needed
     return max(P.main_outer_width, needed)
@@ -715,6 +850,30 @@ def validate_parameters():
         raise ValueError("main_bottom_thickness is too large for main_height.")
     if P.main_min_wall_thickness <= 0:
         raise ValueError("main_min_wall_thickness must be positive.")
+    if float(getattr(P, "main_opening_side_margin_x", 0.0)) <= 0 or float(getattr(P, "main_opening_side_margin_y", 0.0)) <= 0:
+        raise ValueError("main_opening_side_margin_x/y must be positive.")
+    if single_container_recess_enabled():
+        if main_single_container_recess_depth() <= 0:
+            raise ValueError("main_single_container_recess_depth must be positive when the insert-seat recess is enabled.")
+        max_recess_depth = min(
+            effective_main_height() - P.main_bottom_thickness - 1.0,
+            max(0.25, float(P.main_top_bridge_height) - 0.25),
+        )
+        if main_single_container_recess_depth() > max_recess_depth + 1e-6:
+            raise ValueError(
+                "main_single_container_recess_depth is too deep for the preserved top bridge/rib. "
+                f"Use <= {max_recess_depth:.2f} mm, or increase main_top_bridge_height."
+            )
+        if main_single_container_recess_depth() > P.single_top_flange_thickness + 1e-6:
+            App.Console.PrintWarning(
+                "main_single_container_recess_depth is deeper than single_top_flange_thickness; "
+                "the single-container flange top will sit below the main rim and the dish will rest on the main rim.\n"
+            )
+        # Ensure the four flange seats do not overlap each other or break through the outer edge.
+        if effective_opening_gap_x() < 2.0 * main_single_container_recess_overhang_x() + 0.5:
+            raise ValueError("opening_gap_x is too small for the single-container flange recesses.")
+        if effective_opening_gap_y() < 2.0 * main_single_container_recess_overhang_y() + 0.5:
+            raise ValueError("opening_gap_y is too small for the single-container flange recesses.")
     if main_bay_length() >= effective_main_outer_length():
         raise ValueError("Main opening group does not fit in X.")
     if main_bay_width() >= effective_main_outer_width():
@@ -819,7 +978,7 @@ def validate_parameters():
             raise ValueError("Y perimeter strip is too narrow for modular top-lock sockets.")
         if int(getattr(P, "modular_array_count_x", 1)) < 1 or int(getattr(P, "modular_array_count_y", 1)) < 1:
             raise ValueError("modular_array_count_x/y must be at least 1.")
-    if P.enable_central_column:
+    if physical_central_column_enabled():
         if P.central_column_diameter <= 0:
             raise ValueError("central_column_diameter must be positive.")
         if P.central_column_bore_diameter >= P.central_column_diameter - 1.0:
@@ -1154,7 +1313,7 @@ def central_port_z_positions():
 def central_column_internal_cutters():
     """Blind top bore plus radial ports. No cutter reaches the bottom face."""
     cutters = []
-    if not P.enable_central_column:
+    if not physical_central_column_enabled():
         return cutters
     bore_height = effective_main_height() - P.central_column_bore_bottom_z + 2.0
     cutters.append(cylinder_z(P.central_column_bore_diameter,
@@ -1213,7 +1372,7 @@ def main_lower_cross_section_area_mm2():
         rects.append((-channel_x / 2.0, channel_x / 2.0, -main_bay_width() / 2.0, main_bay_width() / 2.0))
         rects.append((-main_bay_length() / 2.0, main_bay_length() / 2.0, -channel_y / 2.0, channel_y / 2.0))
     area = rectangle_union_area(rects)
-    if P.enable_central_column:
+    if physical_central_column_enabled():
         # Nominal displacement of the solid column within the connected lower area.
         area -= math.pi * (P.central_column_diameter / 2.0) ** 2
         # The blind bore is a small extra liquid volume above central_column_bore_bottom_z.
@@ -2059,6 +2218,19 @@ def make_main_container():
                                     P.main_bottom_thickness,
                                     x, y))
 
+    # Shallow top seat/counterbore for the removable single-container flange.
+    # This larger recess does not go through the part; the smaller through-opening
+    # below remains the ledge that stops the insert from falling into the holder.
+    if single_container_recess_enabled() and main_single_container_recess_depth() > 0:
+        recess_depth = main_single_container_recess_depth()
+        recess_zmin = effective_main_height() - recess_depth
+        for x, y in opening_centres():
+            cutters.append(box_centered(main_single_container_recess_length(),
+                                        main_single_container_recess_width(),
+                                        recess_depth + 0.08,
+                                        recess_zmin,
+                                        x, y))
+
     # Lower communication channels through internal divider walls only.
     if P.connect_main_wells_internally:
         channel_zmin = P.main_bottom_thickness
@@ -2070,7 +2242,7 @@ def make_main_container():
 
     # Remove bulky square junction material above the closed bottom, then add back
     # a cylindrical column. This keeps the bottom sealed while avoiding a double-wall look.
-    if P.enable_central_column:
+    if physical_central_column_enabled():
         cutout = P.central_column_diameter + 2.0 * P.central_column_cutout_clearance
         cutters.append(box_centered(cutout, cutout,
                                     effective_main_height() - P.main_bottom_thickness + 2.0,
@@ -2086,7 +2258,7 @@ def make_main_container():
 
     shape = cut_many(base, cutters)
 
-    if P.enable_central_column:
+    if physical_central_column_enabled():
         column = cylinder_z(P.central_column_diameter, effective_main_height(), 0.0, 0.0, 0.0)
         shape = fuse_many([shape, column])
         shape = cut_many(shape, central_column_internal_cutters())
@@ -2149,8 +2321,9 @@ def make_dish():
                                     P.dish_thickness - P.dish_basket_lip_recess_depth,
                                     x, y))
 
-    # Central fill/access hole for liquid injection into the hollow main-column bore.
-    if P.enable_central_column and P.dish_central_fill_hole_diameter > 0:
+    # Central fill/access hole. This can remain present even when the physical
+    # middle column is disabled in the main container.
+    if dish_central_fill_hole_enabled() and P.dish_central_fill_hole_diameter > 0:
         cutters.append(cylinder_z(P.dish_central_fill_hole_diameter,
                                   P.dish_thickness + 2.0,
                                   -1.0, 0.0, 0.0))
@@ -2244,8 +2417,8 @@ def create_document():
 
     # Stack positions. The insert body extends down into the main opening; the flange
     # top is above the main holder. Dish sits above the insert flange.
-    insert_z = effective_main_height() - P.single_depth
-    dish_z = effective_main_height() + P.single_top_flange_thickness + P.z_clearance
+    insert_z = main_insert_z()
+    dish_z = main_dish_support_z() + P.z_clearance
     basket_z = dish_z + P.dish_thickness - effective_basket_depth()
 
     show_array = bool(getattr(P, "show_modular_array_preview", False))
@@ -2404,6 +2577,9 @@ def create_document():
         note.LabelText = [
             "Critical mating dimensions:",
             f"Main opening = {main_opening_length():.2f} x {main_opening_width():.2f} mm",
+            f"Opening side margins = {effective_main_opening_side_margin_x():.2f} mm X, {effective_main_opening_side_margin_y():.2f} mm Y",
+            f"Single-container flange recess = {main_single_container_recess_length():.2f} x {main_single_container_recess_width():.2f} x {main_single_container_recess_depth():.2f} mm",
+            f"Physical central column enabled = {physical_central_column_enabled()}",
             f"Single body = {P.single_body_length:.2f} x {P.single_body_width:.2f} mm",
             f"Dish window = {dish_window_length():.2f} x {dish_window_width():.2f} mm",
             f"Basket body = {effective_basket_body_length():.2f} x {effective_basket_body_width():.2f} mm",
@@ -2423,12 +2599,17 @@ def create_document():
 
     App.Console.PrintMessage(f"Single-container nominal capacity: {single_container_capacity_ml():.1f} mL\n")
     App.Console.PrintMessage(f"Main-container nominal capacity: {main_container_capacity_ml():.1f} mL\n")
+    App.Console.PrintMessage(f"Opening side margins: X={effective_main_opening_side_margin_x():.1f} mm, Y={effective_main_opening_side_margin_y():.1f} mm\n")
+    App.Console.PrintMessage(f"Single-container seat recess depth: {main_single_container_recess_depth():.1f} mm\n")
+    App.Console.PrintMessage(f"Physical central column enabled: {physical_central_column_enabled()}\n")
     if show_array:
         total_modules = max(1, int(P.modular_array_count_x)) * max(1, int(P.modular_array_count_y))
         App.Console.PrintMessage(f"Modular preview: {P.modular_array_count_x} x {P.modular_array_count_y} modules = {total_modules * 4} plant openings\n")
         if modular_slots_enabled():
             App.Console.PrintMessage("Modular connector tabs are separate removable parts; flat-wall slots are removed and edge slots are blind recesses.\n")
     App.Console.PrintMessage(f"Volume bars/labels omitted above top {P.volume_mark_top_exclusion_mm:.1f} mm zone.\n")
+    App.Console.PrintMessage(f"Main single-container recess depth: {main_single_container_recess_depth():.2f} mm\n")
+    App.Console.PrintMessage(f"Main opening side margins: X={effective_main_opening_side_margin_x():.2f} mm, Y={effective_main_opening_side_margin_y():.2f} mm\n")
 
     doc.recompute()
 
