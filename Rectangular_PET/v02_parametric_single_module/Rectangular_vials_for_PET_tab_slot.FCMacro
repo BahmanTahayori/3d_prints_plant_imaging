@@ -11,6 +11,41 @@ Creates:
      and a central fill/access hole above the hollow column.
   4) Basket: one removable plant basket design carried by the dish.
 
+Revision v26 — explicit bolt/pin position inset parameters:
+  - Adds alignment_pin_position_mode and explicit X/Y inset-from-outer-edge
+    parameters so the four alignment bolts can be moved farther from the outside
+    edges, toward the centre, without indirectly changing wall margins.
+  - Keeps v25 bolt-style dish fasteners and printable nuts.
+
+Revision v25 — bolt-style dish fasteners and printable nuts:
+  - Converts the four main-container alignment pins into bolt-like vertical
+    fasteners when alignment_fastener_style="bolt_and_nut".
+  - Dish holes are sized for the bolt/thread outer diameter plus clearance.
+  - Adds matching printable hex nuts as separate Part::Feature objects, positioned
+    on top of the dish by default.
+  - The bolt height can auto-expand so enough thread remains above the dish for
+    nut engagement.
+  - The bolt thread is represented by printable stacked circular ridges rather
+    than a true helical ISO thread, which is more robust for small 3D-printed
+    PET container parts.
+
+Revision v23 — recess-aware main-container auto-sizing:
+  - The main-container outer length/width now automatically include the full
+    single-container flange recess/counterbore footprint.
+  - main_opening_side_margin_x/y are now treated as the requested clear solid
+    margin OUTSIDE the recess/seat, not merely outside the through-opening.
+    Therefore, when the recess grows, the main container grows too.
+  - The macro reports both the requested clear margin outside the recess and the
+    resulting through-opening-edge-to-outside-wall distance.
+
+Revision v24 — recess-aware main-height fix:
+  - effective_main_height() now includes the single-container recess depth when
+    auto_expand_main_height_to_single=True. This keeps the inserted single
+    container bottom above the closed main-container bottom even when the flange
+    sits down inside the top recess.
+  - The macro prints the generated main height and single-container bottom
+    clearance above the closed bottom.
+
 Revision v22 — recess-depth fix and clearer insert seat:
   - main_single_container_recess_depth is no longer silently clamped to
     single_top_flange_thickness. If the value is too deep for the preserved top
@@ -110,7 +145,7 @@ except Exception:  # FreeCADCmd/headless
 class P:
     # General fabrication tolerances
     fit_clearance_xy = 1.25       # one-side clearance for sliding fits, mm
-    z_clearance = 0.20            # vertical clearance between stacked parts, mm
+    z_clearance = 0.50            # vertical clearance between stacked parts, mm
     fillet_radius = 0         # set 0 to disable simple all-edge fillets
 
     # Main container / holder tray.
@@ -129,12 +164,15 @@ class P:
     main_bottom_thickness = 2.0   # closed bottom; no cut reaches below this plane
     main_min_wall_thickness = 3.5 # minimum outside perimeter wall; extra space stays as wall
 
-    # Explicit outer margin from the OUTERMOST main openings to the outside
-    # walls of the main container. These make the opening-to-side distance easy
-    # to control independently in X and Y. The effective generated margin is
-    # max(these values, any margin required for slots/pins/recess ledges).
-    main_opening_side_margin_x = 10.0
-    main_opening_side_margin_y = 10.0
+    # Explicit clear solid margin OUTSIDE the single-container flange recess/seat.
+    # These values are measured from the outer edge of the recess/counterbore to
+    # the outside wall of the main container. The through-opening edge-to-wall
+    # distance is therefore:
+    #   main_opening_side_margin + recess_overhang
+    # The generated main holder auto-expands if the recess, slots, pins, or minimum
+    # land require more material.
+    main_opening_side_margin_x = 12.0
+    main_opening_side_margin_y = 12.0
 
     # Optional top seat/counterbore around each main opening. The through-opening
     # remains sized for the single-container body; this shallow larger recess
@@ -147,8 +185,8 @@ class P:
 
     # Four top openings. By default these are derived from the single-container body.
     # With the defaults below, each opening is single_body + 2*fit_clearance_xy.
-    opening_gap_x = 15             # top bridge/rib between left/right openings
-    opening_gap_y = 15            # top bridge/rib between lower/upper openings
+    opening_gap_x = 16             # top bridge/rib between left/right openings
+    opening_gap_y = 16            # top bridge/rib between lower/upper openings
 
     # Internally connect the four wells below the upper bridge/rib while preserving
     # four separate top openings and a closed bottom.
@@ -182,8 +220,8 @@ class P:
     auto_fit_dish_outer_xy_to_layout = True
     dish_outer_overhang = 2.0
     dish_min_edge_margin = 2.0     # minimum dish material outside window/recess features, mm
-    dish_thickness = 2.4
-    dish_basket_lip_recess_depth = 1.2
+    dish_thickness = 3
+    dish_basket_lip_recess_depth = 1.6
     dish_basket_lip_recess_clearance = 1.2
     # Keep this enabled if you want the dish to retain a centre fill/access hole
     # even when enable_central_column=False in the main container.
@@ -221,7 +259,7 @@ class P:
     basket_lip_width = 25.0        # used only if derive_basket_from_single=False
     basket_lip_overhang_x = 4.5  # each side; used when derive_basket_from_single=True
     basket_lip_overhang_y = 4.5   # each side; used when derive_basket_from_single=True
-    basket_lip_thickness = 1.0
+    basket_lip_thickness = 1.4
     basket_corner_fillet = 0.9
 
     # Basket perforations/slots
@@ -238,11 +276,48 @@ class P:
     # perimeter/rib material outside the single-container openings. Matching holes
     # are cut into the dish. No external main-container lugs are added.
     enable_alignment_pins = True
-    alignment_pin_count = 2            # 2 = front/back internal pins; 4 also adds left/right internal pins
+    alignment_pin_count = 4            # 2 = front/back internal pins; 4 also adds left/right internal pins
     alignment_pin_diameter = 2.5
-    alignment_pin_height = 4
-    alignment_pin_hole_clearance = 0.35
+    alignment_pin_height = 8
+    alignment_pin_hole_clearance = 1
     alignment_pin_min_surround = 0.80  # minimum solid material around each pin within the perimeter strip
+
+    # Explicit alignment fastener positioning.
+    # "strip_center" keeps the older behaviour: pins/bolts are placed halfway
+    # across the available perimeter strip.
+    # "inset_from_outer_edge" places them a user-controlled distance from the
+    # outside wall. Increasing the inset moves the fasteners farther from the
+    # outer edge and closer to the centre/opening group.
+    alignment_pin_position_mode = "inset_from_outer_edge"
+    alignment_pin_inset_from_outer_edge_x = 12  # used for left/right bolts, mm
+    alignment_pin_inset_from_outer_edge_y = 12  # used for front/back bolts, mm
+
+    # Bolt/nut conversion for the alignment pins. The same four alignment positions
+    # are used, but the vertical posts on the main container become bolt-like posts
+    # and separate printable nuts are generated above the dish.
+    # "pin" keeps the previous smooth-pin behaviour.
+    # "bolt_and_nut" uses a smooth core plus printable circular thread ridges.
+    alignment_fastener_style = "bolt_and_nut"
+    alignment_bolt_auto_height = True
+    alignment_bolt_min_thread_above_dish = 3.4  # mm of bolt above dish top for nut engagement
+    alignment_bolt_core_diameter = 2.5          # nominal/smooth core diameter, mm
+    alignment_bolt_thread_outer_diameter = 3.1  # outside diameter of printed thread ridges, mm
+    alignment_bolt_thread_pitch = 1.2           # spacing between circular ridges, mm
+    alignment_bolt_thread_ridge_height = 0.30   # axial height of each ridge, mm
+    alignment_bolt_unthreaded_base_height = 1.0
+    alignment_bolt_tip_clearance = 0.35
+
+    # Matching printable nut. The bore auto-follows the bolt outer diameter unless
+    # alignment_nut_bore_diameter is set > 0. This is a clearance nut for printing;
+    # the visual/functional grip comes from the bolt ridges and friction, not an
+    # exact helical machine thread.
+    show_alignment_nuts_in_assembly = True
+    alignment_nut_across_flats = 7.5
+    alignment_nut_thickness = 3.2
+    alignment_nut_bore_diameter = 0.0           # 0 = auto
+    alignment_nut_bore_clearance = 0.45
+    alignment_nut_bottom_clearance = 0.15
+    alignment_nut_corner_fillet = 0.15
 
     # Dish handle: tabs on the dish only. They are not part of the main box.
     enable_dish_handle = True
@@ -344,15 +419,15 @@ class P:
     # Part ID labels. These are made from simple stroke geometry, not font files,
     # so they should export with STL/STEP without a FreeCAD font dependency.
     # Default is engraved/recessed, not raised, so stacked parts sit flat.
-    enable_part_labels = False
+    enable_part_labels = True
     label_style = "engraved"        # "engraved" or "raised"
-    label_depth = 0.35              # cut depth for engraved labels, mm
+    label_depth = 1.2              # cut depth for engraved labels, mm
     label_raised_height = 0.30      # extrusion height if label_style="raised", mm
-    label_stroke_width = 0.18
+    label_stroke_width = 0.2
     # Small default labels fit on narrow top frame/flange strips.
     main_label_scale = 0.40
     single_label_scale = 0.40
-    basket_label_scale = 0.40
+    basket_label_scale = 0.8
     dish_label_scale = 0.40
 
     # Volume/capacity marks. 1 mL = 1000 mm^3. Marks are nominal geometric
@@ -387,7 +462,7 @@ class P:
 
     # What to build/display. Default macro view is intentionally simple:
     # Main_Container, Dish, one Single_Container_A1, and one Basket_A1.
-    add_four_insert_copies = False
+    add_four_insert_copies = True
     add_four_basket_copies = False
     add_reference_parts_to_side = False
     create_mating_dimensions_note = False
@@ -509,24 +584,63 @@ def main_recess_min_land():
     return max(0.0, float(getattr(P, "main_single_container_recess_min_land", 1.0)))
 
 
+def requested_clear_margin_outside_recess_x():
+    """Requested solid material outside the flange recess on left/right sides."""
+    return max(0.0, float(getattr(P, "main_opening_side_margin_x", P.main_min_wall_thickness)))
+
+
+def requested_clear_margin_outside_recess_y():
+    """Requested solid material outside the flange recess on front/back sides."""
+    return max(0.0, float(getattr(P, "main_opening_side_margin_y", P.main_min_wall_thickness)))
+
+
 def required_seat_margin_x():
+    """Minimum through-opening-edge-to-wall margin required by the flange recess."""
     return main_single_container_recess_overhang_x() + main_recess_min_land()
 
 
 def required_seat_margin_y():
+    """Minimum through-opening-edge-to-wall margin required by the flange recess."""
     return main_single_container_recess_overhang_y() + main_recess_min_land()
 
 
+def requested_recess_aware_margin_from_opening_x():
+    """Requested through-opening-edge-to-wall margin after adding the recess footprint.
+
+    The user-facing main_opening_side_margin_x is measured outside the recess, so
+    the main holder must add the recess overhang to get the actual distance from
+    the through-opening edge to the outside wall.
+    """
+    return requested_clear_margin_outside_recess_x() + main_single_container_recess_overhang_x()
+
+
+def requested_recess_aware_margin_from_opening_y():
+    """Requested through-opening-edge-to-wall margin after adding the recess footprint."""
+    return requested_clear_margin_outside_recess_y() + main_single_container_recess_overhang_y()
+
+
 def effective_main_opening_side_margin_x():
-    return max(float(getattr(P, "main_opening_side_margin_x", P.main_min_wall_thickness)),
+    """Actual distance from the through-opening edge to the outside wall in X."""
+    return max(requested_recess_aware_margin_from_opening_x(),
                required_main_wall_strip_x(),
                required_seat_margin_x())
 
 
 def effective_main_opening_side_margin_y():
-    return max(float(getattr(P, "main_opening_side_margin_y", P.main_min_wall_thickness)),
+    """Actual distance from the through-opening edge to the outside wall in Y."""
+    return max(requested_recess_aware_margin_from_opening_y(),
                required_main_wall_strip_y(),
                required_seat_margin_y())
+
+
+def effective_clear_margin_outside_recess_x():
+    """Actual remaining clear solid material outside the flange recess in X."""
+    return max(0.0, effective_main_opening_side_margin_x() - main_single_container_recess_overhang_x())
+
+
+def effective_clear_margin_outside_recess_y():
+    """Actual remaining clear solid material outside the flange recess in Y."""
+    return max(0.0, effective_main_opening_side_margin_y() - main_single_container_recess_overhang_y())
 
 
 def main_insert_z():
@@ -549,11 +663,65 @@ def main_dish_support_z():
     return max(effective_main_height(), assembled_single_container_top_z())
 
 
+
+def alignment_bolt_and_nut_enabled():
+    return str(getattr(P, "alignment_fastener_style", "pin")).strip().lower() in {
+        "bolt", "bolts", "bolt_and_nut", "bolt-nut", "bolt_nut"
+    }
+
+
+def alignment_bolt_core_diameter():
+    if alignment_bolt_and_nut_enabled():
+        return max(0.2, float(getattr(P, "alignment_bolt_core_diameter", P.alignment_pin_diameter)))
+    return float(P.alignment_pin_diameter)
+
+
+def alignment_fastener_outer_diameter():
+    if alignment_bolt_and_nut_enabled():
+        return max(
+            alignment_bolt_core_diameter(),
+            float(getattr(P, "alignment_bolt_thread_outer_diameter", P.alignment_pin_diameter)),
+        )
+    return float(P.alignment_pin_diameter)
+
+
+def alignment_fastener_hole_diameter():
+    """Diameter of the dish clearance hole for the alignment bolt/pin."""
+    return alignment_fastener_outer_diameter() + max(0.0, float(P.alignment_pin_hole_clearance))
+
+
+def effective_alignment_fastener_height():
+    """Height of the post rising from the main-container top.
+
+    In bolt/nut mode this can auto-grow so the bolt reaches through the dish and
+    still leaves enough thread for a nut above the dish.
+    """
+    h = float(P.alignment_pin_height)
+    if alignment_bolt_and_nut_enabled() and bool(getattr(P, "alignment_bolt_auto_height", True)):
+        dish_z = main_dish_support_z() + float(P.z_clearance)
+        needed = (
+            (dish_z + float(P.dish_thickness) - effective_main_height())
+            + float(getattr(P, "alignment_bolt_min_thread_above_dish", 3.0))
+        )
+        h = max(h, needed)
+    return h
+
+
+def alignment_nut_bore_diameter():
+    manual = float(getattr(P, "alignment_nut_bore_diameter", 0.0))
+    if manual > 0:
+        return manual
+    return alignment_fastener_outer_diameter() + max(0.0, float(getattr(P, "alignment_nut_bore_clearance", 0.4)))
+
+
+def alignment_nut_assembly_z(dish_z):
+    return float(dish_z) + float(P.dish_thickness) + max(0.0, float(getattr(P, "alignment_nut_bottom_clearance", 0.0)))
+
 def internal_pin_required_wall_strip():
     if not P.enable_alignment_pins:
         return P.main_min_wall_thickness
     return max(P.main_min_wall_thickness,
-               P.alignment_pin_diameter + 2.0 * P.alignment_pin_min_surround)
+               alignment_fastener_outer_diameter() + 2.0 * P.alignment_pin_min_surround)
 
 
 def _normalise_modular_slot_sides():
@@ -768,12 +936,27 @@ def effective_main_height():
     auto_expand_main_height_to_single is enabled, the generated main container is
     made tall enough that the single-container body can hang into the holder while
     still leaving the closed bottom intact.
+
+    Important: once the single-container flange sits down inside a top recess,
+    the body bottom moves down by main_single_container_recess_depth(). Therefore
+    the required holder height must include that recess depth. Otherwise the
+    single-container body can overlap the closed bottom.
     """
     h = float(P.main_height)
     if getattr(P, "auto_expand_main_height_to_single", True):
-        needed = float(P.single_depth) + float(P.main_bottom_thickness) + max(0.0, float(P.z_clearance))
+        needed = (
+            float(P.single_depth)
+            + main_single_container_recess_depth()
+            + float(P.main_bottom_thickness)
+            + max(0.0, float(P.z_clearance))
+        )
         h = max(h, needed)
     return h
+
+
+def main_insert_bottom_clearance():
+    """Clearance between the inserted single-container bottom and the closed main bottom."""
+    return main_insert_z() - float(P.main_bottom_thickness)
 
 
 def effective_basket_depth():
@@ -824,18 +1007,47 @@ def opening_centres():
                         main_opening_width() + effective_opening_gap_y())
 
 
-def alignment_pin_positions():
-    """Internal pin positions inside the main footprint.
+def alignment_pin_position_mode():
+    return str(getattr(P, "alignment_pin_position_mode", "strip_center")).strip().lower()
 
-    Default two-pin layout: front/back pins on the central X rib, in the solid
-    perimeter strip outside the insert openings. This avoids external lugs and
-    avoids touching the removable single containers. Four-pin mode additionally
-    places left/right pins on the central Y rib.
+
+def alignment_pin_required_surround_radius():
+    """Radial clearance needed around one alignment pin/bolt centre."""
+    return alignment_fastener_outer_diameter() / 2.0 + max(0.0, float(P.alignment_pin_min_surround))
+
+
+def alignment_pin_inset_from_outer_edge_x():
+    return max(0.0, float(getattr(P, "alignment_pin_inset_from_outer_edge_x", 8.0)))
+
+
+def alignment_pin_inset_from_outer_edge_y():
+    return max(0.0, float(getattr(P, "alignment_pin_inset_from_outer_edge_y", 8.0)))
+
+
+def alignment_pin_positions():
+    """Internal pin/bolt positions inside the main footprint.
+
+    Two positioning modes are supported:
+      - strip_center: old behaviour, pins/bolts are centred in the available
+        solid perimeter strip outside the 2 x 2 opening group.
+      - inset_from_outer_edge: explicit user control. Increasing the inset moves
+        the fastener farther from the outside wall and closer to the centre.
     """
     L = effective_main_outer_length()
     W = effective_main_outer_width()
     strip_x = (L - main_bay_length()) / 2.0
     strip_y = (W - main_bay_width()) / 2.0
+
+    mode = alignment_pin_position_mode()
+    if mode in {"inset", "inset_from_outer_edge", "edge_inset", "outer_inset"}:
+        y_abs = W / 2.0 - alignment_pin_inset_from_outer_edge_y()
+        positions = [(0.0, -y_abs), (0.0, y_abs)]
+        if int(P.alignment_pin_count) >= 4:
+            x_abs = L / 2.0 - alignment_pin_inset_from_outer_edge_x()
+            positions.extend([(-x_abs, 0.0), (x_abs, 0.0)])
+        return positions
+
+    # Backward-compatible default: centre in the available perimeter strip.
     y_abs = main_bay_width() / 2.0 + strip_y / 2.0
     positions = [(0.0, -y_abs), (0.0, y_abs)]
     if int(P.alignment_pin_count) >= 4:
@@ -848,6 +1060,17 @@ def validate_parameters():
         raise ValueError("main_bottom_thickness must be positive because the bottom must remain closed.")
     if P.main_bottom_thickness >= effective_main_height() - 2.0:
         raise ValueError("main_bottom_thickness is too large for main_height.")
+    if main_insert_bottom_clearance() < -1e-6:
+        needed = (
+            float(P.single_depth)
+            + main_single_container_recess_depth()
+            + float(P.main_bottom_thickness)
+            + max(0.0, float(P.z_clearance))
+        )
+        raise ValueError(
+            "main_height is too short for the inserted single container and top recess. "
+            f"Use main_height >= {needed:.2f} mm or set auto_expand_main_height_to_single=True."
+        )
     if P.main_min_wall_thickness <= 0:
         raise ValueError("main_min_wall_thickness must be positive.")
     if float(getattr(P, "main_opening_side_margin_x", 0.0)) <= 0 or float(getattr(P, "main_opening_side_margin_y", 0.0)) <= 0:
@@ -913,17 +1136,48 @@ def validate_parameters():
     if effective_basket_lip_length() <= dish_window_length() or effective_basket_lip_width() <= dish_window_width():
         raise ValueError("Basket lip must be larger than the dish window so the dish can carry it.")
     if P.enable_alignment_pins:
-        if P.alignment_pin_diameter <= 0 or P.alignment_pin_height <= 0:
-            raise ValueError("Alignment pin diameter/height must be positive.")
+        if alignment_fastener_outer_diameter() <= 0 or effective_alignment_fastener_height() <= 0:
+            raise ValueError("Alignment pin/bolt diameter and height must be positive.")
+        if alignment_bolt_and_nut_enabled():
+            if alignment_bolt_core_diameter() > alignment_fastener_outer_diameter() + 1e-6:
+                raise ValueError("alignment_bolt_core_diameter must be <= alignment_bolt_thread_outer_diameter.")
+            if float(getattr(P, "alignment_bolt_thread_pitch", 0.0)) <= 0:
+                raise ValueError("alignment_bolt_thread_pitch must be positive in bolt mode.")
+            if float(getattr(P, "alignment_nut_across_flats", 0.0)) <= alignment_nut_bore_diameter() + 1.0:
+                raise ValueError("alignment_nut_across_flats is too small for the nut bore.")
+            if float(getattr(P, "alignment_nut_thickness", 0.0)) <= 0:
+                raise ValueError("alignment_nut_thickness must be positive.")
         if P.alignment_pin_min_surround < 0.3:
-            raise ValueError("alignment_pin_min_surround should leave printable material around the pin.")
+            raise ValueError("alignment_pin_min_surround should leave printable material around the pin/bolt.")
         strip_y = (effective_main_outer_width() - main_bay_width()) / 2.0
-        if strip_y < P.alignment_pin_diameter + 2.0 * P.alignment_pin_min_surround - 1e-6:
-            raise ValueError("Y perimeter strip is too narrow for internal alignment pins.")
-        if int(P.alignment_pin_count) >= 4:
-            strip_x = (effective_main_outer_length() - main_bay_length()) / 2.0
-            if strip_x < P.alignment_pin_diameter + 2.0 * P.alignment_pin_min_surround - 1e-6:
-                raise ValueError("X perimeter strip is too narrow for four internal alignment pins.")
+        strip_x = (effective_main_outer_length() - main_bay_length()) / 2.0
+        req_r = alignment_pin_required_surround_radius()
+        if strip_y < 2.0 * req_r - 1e-6:
+            raise ValueError("Y perimeter strip is too narrow for internal alignment pins/bolts.")
+        if int(P.alignment_pin_count) >= 4 and strip_x < 2.0 * req_r - 1e-6:
+            raise ValueError("X perimeter strip is too narrow for four internal alignment pins/bolts.")
+
+        mode = alignment_pin_position_mode()
+        if mode in {"inset", "inset_from_outer_edge", "edge_inset", "outer_inset"}:
+            min_y = req_r
+            max_y = strip_y - req_r
+            if not (min_y - 1e-6 <= alignment_pin_inset_from_outer_edge_y() <= max_y + 1e-6):
+                raise ValueError(
+                    "alignment_pin_inset_from_outer_edge_y places the front/back bolts outside the safe solid strip. "
+                    f"Use {min_y:.2f} to {max_y:.2f} mm, or increase main_opening_side_margin_y."
+                )
+            if int(P.alignment_pin_count) >= 4:
+                min_x = req_r
+                max_x = strip_x - req_r
+                if not (min_x - 1e-6 <= alignment_pin_inset_from_outer_edge_x() <= max_x + 1e-6):
+                    raise ValueError(
+                        "alignment_pin_inset_from_outer_edge_x places the left/right bolts outside the safe solid strip. "
+                        f"Use {min_x:.2f} to {max_x:.2f} mm, or increase main_opening_side_margin_x."
+                    )
+        elif mode not in {"strip_center", "center", "centre", "mid_strip"}:
+            raise ValueError(
+                "alignment_pin_position_mode must be 'strip_center' or 'inset_from_outer_edge'."
+            )
     if modular_slots_enabled():
         if P.modular_slot_depth <= 0 or P.modular_slot_height <= 0:
             raise ValueError("modular_slot_depth and modular_slot_height must be positive.")
@@ -2195,6 +2449,70 @@ def validate_parameters():
     if P.modular_edge_slot_insertion_length >= min(effective_main_outer_length(), effective_main_outer_width()) / 2.0:
         raise ValueError("Edge slot insertion length is too large for the main-container footprint.")
 
+
+def regular_prism_z(radius, sides, height, zmin=0.0, x=0.0, y=0.0, rotation_deg=30.0):
+    """Regular polygon prism extruded in Z, used for printable hex nuts."""
+    sides = max(3, int(sides))
+    r = float(radius)
+    pts = []
+    rot = math.radians(float(rotation_deg))
+    for i in range(sides):
+        a = rot + 2.0 * math.pi * i / sides
+        pts.append(App.Vector(float(x + r * math.cos(a)), float(y + r * math.sin(a)), float(zmin)))
+    pts.append(pts[0])
+    wire = Part.makePolygon(pts)
+    face = Part.Face(wire)
+    return face.extrude(App.Vector(0, 0, float(height)))
+
+
+def make_alignment_fastener_shape(zmin, x=0.0, y=0.0):
+    """Vertical alignment post or bolt-like post fused to the main container."""
+    if not alignment_bolt_and_nut_enabled():
+        return cylinder_z(P.alignment_pin_diameter, effective_alignment_fastener_height(), zmin, x, y)
+
+    height = effective_alignment_fastener_height()
+    core_d = alignment_bolt_core_diameter()
+    outer_d = alignment_fastener_outer_diameter()
+    shapes = [cylinder_z(core_d, height, zmin, x, y)]
+
+    pitch = max(0.2, float(getattr(P, "alignment_bolt_thread_pitch", 1.0)))
+    ridge_h = max(0.05, min(float(getattr(P, "alignment_bolt_thread_ridge_height", 0.25)), pitch * 0.75))
+    base_h = max(0.0, float(getattr(P, "alignment_bolt_unthreaded_base_height", 0.0)))
+    tip_clear = max(0.0, float(getattr(P, "alignment_bolt_tip_clearance", 0.0)))
+
+    # Printable thread approximation: stacked raised rings. This avoids fragile
+    # tiny helical threads while still giving the nut a mechanical/friction grip.
+    z = float(zmin) + base_h + pitch * 0.5
+    zmax = float(zmin) + height - tip_clear
+    while z + ridge_h / 2.0 <= zmax:
+        shapes.append(cylinder_z(outer_d, ridge_h, z - ridge_h / 2.0, x, y))
+        z += pitch
+
+    return fuse_many(shapes)
+
+
+def make_alignment_nut_shape():
+    """Separate printable hex nut for the alignment bolts."""
+    across_flats = max(0.5, float(getattr(P, "alignment_nut_across_flats", 7.0)))
+    radius = across_flats / math.sqrt(3.0)  # circumradius for requested across-flats size
+    thickness = max(0.2, float(getattr(P, "alignment_nut_thickness", 3.0)))
+    nut = regular_prism_z(radius, 6, thickness, 0.0, 0.0, 0.0, rotation_deg=30.0)
+
+    bore = cylinder_z(alignment_nut_bore_diameter(), thickness + 2.0, -1.0, 0.0, 0.0)
+    nut = nut.cut(bore)
+
+    # Add shallow top/bottom relief holes to make the nut easier to start on the
+    # printed bolt and reduce elephant-foot sensitivity.
+    relief_d = alignment_nut_bore_diameter() + 0.35
+    relief_h = min(0.45, thickness / 4.0)
+    if relief_h > 0.05:
+        nut = nut.cut(cylinder_z(relief_d, relief_h + 0.05, -0.02, 0.0, 0.0))
+        nut = nut.cut(cylinder_z(relief_d, relief_h + 0.05, thickness - relief_h, 0.0, 0.0))
+
+    nut = safe_remove_splitter(nut)
+    nut = safe_fillet(nut, getattr(P, "alignment_nut_corner_fillet", 0.0))
+    return nut
+
 # -----------------------------------------------------------------------------
 # Part builders
 # -----------------------------------------------------------------------------
@@ -2264,9 +2582,9 @@ def make_main_container():
         shape = cut_many(shape, central_column_internal_cutters())
 
     if P.enable_alignment_pins:
-        pins = [cylinder_z(P.alignment_pin_diameter, P.alignment_pin_height, effective_main_height(), x, y)
-                for x, y in alignment_pin_positions()]
-        shape = fuse_many([shape] + pins)
+        fasteners = [make_alignment_fastener_shape(effective_main_height(), x, y)
+                     for x, y in alignment_pin_positions()]
+        shape = fuse_many([shape] + fasteners)
 
     shape = apply_part_label_features(shape, main_label_shapes())
     shape = apply_volume_mark_features(shape, main_volume_bar_shapes())
@@ -2329,7 +2647,7 @@ def make_dish():
                                   -1.0, 0.0, 0.0))
 
     if P.enable_alignment_pins:
-        pin_hole_d = P.alignment_pin_diameter + P.alignment_pin_hole_clearance
+        pin_hole_d = alignment_fastener_hole_diameter()
         for x, y in alignment_pin_positions():
             cutters.append(cylinder_z(pin_hole_d, P.dish_thickness + 2.0, -1.0, x, y))
 
@@ -2535,6 +2853,14 @@ def create_document():
                     App.Placement(App.Vector(0, 0, dish_z), App.Rotation()),
                     color=(0.35, 0.55, 0.95), transparency=30)
 
+        if (P.enable_alignment_pins and alignment_bolt_and_nut_enabled() and
+                bool(getattr(P, "show_alignment_nuts_in_assembly", True))):
+            nut_shape = make_alignment_nut_shape()
+            nut_z = alignment_nut_assembly_z(dish_z)
+            for i, (nx_pos, ny_pos) in enumerate(alignment_pin_positions(), start=1):
+                clone_shape_feature(doc, f"Alignment_Nut_{i}", nut_shape, nx_pos, ny_pos, nut_z,
+                                    color=(0.08, 0.08, 0.08), transparency=0)
+
         centres = opening_centres()
         if P.add_four_insert_copies:
             for i, (x, y) in enumerate(centres, start=1):
@@ -2569,6 +2895,9 @@ def create_document():
                                     color=(0.15, 0.15, 0.15), transparency=0)
                 clone_shape_feature(doc, "Reference_Modular_Key_NS", modular_connector_key_shape("NS"), x_ref, 65.0, 0.0,
                                     color=(0.15, 0.15, 0.15), transparency=0)
+            if P.enable_alignment_pins and alignment_bolt_and_nut_enabled():
+                clone_shape_feature(doc, "Reference_Alignment_Nut", make_alignment_nut_shape(), x_ref, 82.0, 0.0,
+                                    color=(0.08, 0.08, 0.08), transparency=0)
 
     # Optional hidden annotation with critical mating/capacity dimensions. Disabled
     # by default because the user asked for Mating_Dimensions_Note not to be shown.
@@ -2577,7 +2906,8 @@ def create_document():
         note.LabelText = [
             "Critical mating dimensions:",
             f"Main opening = {main_opening_length():.2f} x {main_opening_width():.2f} mm",
-            f"Opening side margins = {effective_main_opening_side_margin_x():.2f} mm X, {effective_main_opening_side_margin_y():.2f} mm Y",
+            f"Clear margin outside recess = {effective_clear_margin_outside_recess_x():.2f} mm X, {effective_clear_margin_outside_recess_y():.2f} mm Y",
+            f"Through-opening edge-to-wall distance = {effective_main_opening_side_margin_x():.2f} mm X, {effective_main_opening_side_margin_y():.2f} mm Y",
             f"Single-container flange recess = {main_single_container_recess_length():.2f} x {main_single_container_recess_width():.2f} x {main_single_container_recess_depth():.2f} mm",
             f"Physical central column enabled = {physical_central_column_enabled()}",
             f"Single body = {P.single_body_length:.2f} x {P.single_body_width:.2f} mm",
@@ -2609,7 +2939,23 @@ def create_document():
             App.Console.PrintMessage("Modular connector tabs are separate removable parts; flat-wall slots are removed and edge slots are blind recesses.\n")
     App.Console.PrintMessage(f"Volume bars/labels omitted above top {P.volume_mark_top_exclusion_mm:.1f} mm zone.\n")
     App.Console.PrintMessage(f"Main single-container recess depth: {main_single_container_recess_depth():.2f} mm\n")
-    App.Console.PrintMessage(f"Main opening side margins: X={effective_main_opening_side_margin_x():.2f} mm, Y={effective_main_opening_side_margin_y():.2f} mm\n")
+    App.Console.PrintMessage(f"Effective main height: {effective_main_height():.2f} mm\n")
+    if P.enable_alignment_pins:
+        App.Console.PrintMessage(f"Alignment fastener style: {getattr(P, 'alignment_fastener_style', 'pin')}\n")
+        App.Console.PrintMessage(f"Alignment position mode: {alignment_pin_position_mode()}\n")
+        if alignment_pin_position_mode() in {"inset", "inset_from_outer_edge", "edge_inset", "outer_inset"}:
+            App.Console.PrintMessage(
+                f"Alignment inset from outer edge: X={alignment_pin_inset_from_outer_edge_x():.2f} mm, "
+                f"Y={alignment_pin_inset_from_outer_edge_y():.2f} mm\n"
+            )
+        App.Console.PrintMessage(f"Alignment fastener outer diameter: {alignment_fastener_outer_diameter():.2f} mm\n")
+        App.Console.PrintMessage(f"Alignment fastener height: {effective_alignment_fastener_height():.2f} mm\n")
+        if alignment_bolt_and_nut_enabled():
+            App.Console.PrintMessage(f"Alignment nut bore: {alignment_nut_bore_diameter():.2f} mm; thickness: {P.alignment_nut_thickness:.2f} mm\n")
+
+    App.Console.PrintMessage(f"Single-container bottom clearance above closed main bottom: {main_insert_bottom_clearance():.2f} mm\n")
+    App.Console.PrintMessage(f"Main clear margin outside recess: X={effective_clear_margin_outside_recess_x():.2f} mm, Y={effective_clear_margin_outside_recess_y():.2f} mm\n")
+    App.Console.PrintMessage(f"Main through-opening edge-to-wall distance: X={effective_main_opening_side_margin_x():.2f} mm, Y={effective_main_opening_side_margin_y():.2f} mm\n")
 
     doc.recompute()
 
