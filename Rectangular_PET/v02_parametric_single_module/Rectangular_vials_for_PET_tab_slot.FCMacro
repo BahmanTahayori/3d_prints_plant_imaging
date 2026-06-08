@@ -11,6 +11,14 @@ Creates:
      and a central fill/access hole above the hollow column.
   4) Basket: one removable plant basket design carried by the dish.
 
+Revision v27 — configurable part-label prefix:
+  - Adds part_label_prefix so generated part IDs can be changed from A1-A4
+    to C1-C4, B1-B4, R1-R4, etc., without editing label-generation code.
+  - Main-container labels, dish labels, single-container labels, basket labels,
+    and generated object names now use the same prefix.
+  - Stroke text now supports seven-segment-style uppercase letters, so non-A
+    prefixes such as C are visible in STL/STEP exports.
+
 Revision v26 — explicit bolt/pin position inset parameters:
   - Adds alignment_pin_position_mode and explicit X/Y inset-from-outer-edge
     parameters so the four alignment bolts can be moved farther from the outside
@@ -419,9 +427,11 @@ class P:
     # Part ID labels. These are made from simple stroke geometry, not font files,
     # so they should export with STL/STEP without a FreeCAD font dependency.
     # Default is engraved/recessed, not raised, so stacked parts sit flat.
+    # Change this to "C" for C1-C4, "B" for B1-B4, etc.
+    part_label_prefix = "C -"
     enable_part_labels = True
     label_style = "engraved"        # "engraved" or "raised"
-    label_depth = 1.2              # cut depth for engraved labels, mm
+    label_depth = 2              # cut depth for engraved labels, mm
     label_raised_height = 0.30      # extrusion height if label_style="raised", mm
     label_stroke_width = 0.2
     # Small default labels fit on narrow top frame/flange strips.
@@ -473,6 +483,36 @@ class P:
     export_stl = False
     export_dir = os.path.join(os.path.expanduser("~"), "PET_plant_container_exports")
     export_visible_only = False
+
+
+def part_label_prefix():
+    """User-facing prefix for A1-A4 style part IDs.
+
+    Examples:
+      part_label_prefix = "A" -> A1, A2, A3, A4
+      part_label_prefix = "C" -> C1, C2, C3, C4
+    """
+    prefix = str(getattr(P, "part_label_prefix", "A")).strip()
+    return prefix if prefix else "A"
+
+
+def part_label(index):
+    """Return the visible part label for a 1-based opening index."""
+    return f"{part_label_prefix()}{int(index)}"
+
+
+def safe_name_fragment(value):
+    """Make a label safe for a FreeCAD object name."""
+    out = []
+    for ch in str(value):
+        out.append(ch if ch.isalnum() else "_")
+    cleaned = "".join(out).strip("_")
+    return cleaned or "Label"
+
+
+def part_label_name(index):
+    """FreeCAD-object-name-safe version of part_label(index)."""
+    return safe_name_fragment(part_label(index))
 
 def main_opening_length():
     return P.single_body_length + 2.0 * P.fit_clearance_xy
@@ -1709,6 +1749,17 @@ _DIGIT_SEGS = {
     "5": "AFGCD", "6": "AFGECD", "7": "ABC", "8": "ABCDEFG", "9": "ABFGCD",
 }
 
+# Seven-segment-style approximations for uppercase letters. This keeps labels
+# printable/exportable without relying on external font files. It is intentionally
+# simple but supports changing part_label_prefix from A to any A-Z letter.
+_LETTER_SEGS = {
+    "A": "ABCEFG", "B": "CDEFG", "C": "ADEF", "D": "BCDEG", "E": "ADEFG",
+    "F": "AEFG", "G": "ACDEF", "H": "BCEFG", "I": "BC", "J": "BCD",
+    "K": "BEFG", "N": "CEG", "O": "ABCDEF", "P": "ABEFG", "Q": "ABCFG",
+    "R": "EG", "S": "ACDFG", "T": "DEFG", "U": "BCDEF", "V": "CDE",
+    "X": "BCEFG", "Y": "BCDFG", "Z": "ABDEG",
+}
+
 
 def stroke_rects_for_char(ch, scale, stroke):
     ch = ch.upper()
@@ -1726,8 +1777,8 @@ def stroke_rects_for_char(ch, scale, stroke):
     }
     if ch in _DIGIT_SEGS:
         return [seg_rects[k] for k in _DIGIT_SEGS[ch]]
-    if ch == "A":
-        return [seg_rects[k] for k in "AFBGEC"]
+    if ch in _LETTER_SEGS:
+        return [seg_rects[k] for k in _LETTER_SEGS[ch]]
     if ch == "M":
         # Blocky M: two verticals and two short upper diagonals approximated by vertical strokes.
         return [seg_rects["F"], seg_rects["E"], seg_rects["B"], seg_rects["C"],
@@ -1735,6 +1786,10 @@ def stroke_rects_for_char(ch, scale, stroke):
                 (W * 0.62 - s / 2.0, W * 0.62 + s / 2.0, H * 0.45, H)]
     if ch == "L":
         return [seg_rects["F"], seg_rects["E"], seg_rects["D"]]
+    if ch == "W":
+        return [seg_rects["F"], seg_rects["E"], seg_rects["B"], seg_rects["C"],
+                (W * 0.38 - s / 2.0, W * 0.38 + s / 2.0, 0.0, H * 0.55),
+                (W * 0.62 - s / 2.0, W * 0.62 + s / 2.0, 0.0, H * 0.55)]
     if ch == "-":
         return [seg_rects["G"]]
     return []
@@ -1873,7 +1928,7 @@ def main_label_shapes():
     shapes = []
     wall_strip_y = (effective_main_outer_width() - main_bay_width()) / 2.0
     y_edge_offset = max(1.2, min(wall_strip_y * 0.55, 4.0))
-    labels = ["A1", "A2", "A3", "A4"]
+    labels = [part_label(i) for i in range(1, 5)]
     for label, (x, y) in zip(labels, opening_centres()):
         # Put labels on the outer top wall adjacent to each opening, not floating over the openings.
         y_label = y - math.copysign(main_opening_width() / 2.0 + y_edge_offset, y)
@@ -1908,7 +1963,7 @@ def dish_label_shapes():
     if not P.enable_part_labels:
         return []
     shapes = []
-    labels = ["A1", "A2", "A3", "A4"]
+    labels = [part_label(i) for i in range(1, 5)]
     # Use the solid front/back dish frame beside each basket window. This keeps the
     # labels on printable material and away from the basket openings.
     pitch_y = main_opening_width() + effective_opening_gap_y()
@@ -2593,8 +2648,10 @@ def make_main_container():
     return shape
 
 
-def make_single_container(label="A1"):
+def make_single_container(label=None):
     """One removable open-top insert container with a top lip/flange."""
+    if label is None:
+        label = part_label(1)
     sw = effective_single_wall()
     sb = effective_single_bottom()
     outer = box_centered(P.single_body_length, P.single_body_width, P.single_depth, 0.0)
@@ -2657,8 +2714,10 @@ def make_dish():
     return shape
 
 
-def make_basket(label="A1"):
+def make_basket(label=None):
     """One open-top plant basket with top lip and perforations."""
+    if label is None:
+        label = part_label(1)
     bw = effective_basket_wall()
     bb = effective_basket_bottom()
     bd = effective_basket_depth()
@@ -2754,15 +2813,15 @@ def create_document():
 
             if getattr(P, "modular_preview_show_inserts", False):
                 for k, (ox, oy) in enumerate(opening_centres(), start=1):
-                    clone_shape_feature(doc, f"Single_Container_M{i}_{j}_A{k}",
-                                        make_single_container(f"A{k}"),
+                    clone_shape_feature(doc, f"Single_Container_M{i}_{j}_{part_label_name(k)}",
+                                        make_single_container(part_label(k)),
                                         x + ox, y + oy, insert_z,
                                         color=(0.40, 0.85, 0.55), transparency=45)
 
             if getattr(P, "modular_preview_show_baskets", False):
                 for k, (ox, oy) in enumerate(opening_centres(), start=1):
-                    clone_shape_feature(doc, f"Basket_M{i}_{j}_A{k}",
-                                        make_basket(f"A{k}"),
+                    clone_shape_feature(doc, f"Basket_M{i}_{j}_{part_label_name(k)}",
+                                        make_basket(part_label(k)),
                                         x + ox, y + oy, basket_z,
                                         color=(0.95, 0.75, 0.35), transparency=15)
 
@@ -2822,10 +2881,10 @@ def create_document():
             x_ref = array_half_x + max(35.0, effective_dish_outer_length() / 2.0 + 20.0)
             clone_shape_feature(doc, "Reference_Dish", dish_shape, x_ref, 0.0, dish_z,
                                 color=(0.35, 0.55, 0.95), transparency=30)
-            clone_shape_feature(doc, "Reference_Single_Container_A1", make_single_container("A1"),
+            clone_shape_feature(doc, f"Reference_Single_Container_{part_label_name(1)}", make_single_container(part_label(1)),
                                 x_ref, -effective_dish_outer_width() / 2.0 - 20.0, 0.0,
                                 color=(0.40, 0.85, 0.55), transparency=25)
-            clone_shape_feature(doc, "Reference_Basket_A1", make_basket("A1"),
+            clone_shape_feature(doc, f"Reference_Basket_{part_label_name(1)}", make_basket(part_label(1)),
                                 x_ref, effective_dish_outer_width() / 2.0 + 20.0, 0.0,
                                 color=(0.95, 0.75, 0.35), transparency=5)
             if modular_slots_enabled() and getattr(P, "modular_preview_show_connector_keys", False):
@@ -2864,31 +2923,31 @@ def create_document():
         centres = opening_centres()
         if P.add_four_insert_copies:
             for i, (x, y) in enumerate(centres, start=1):
-                single_shape_i = make_single_container(f"A{i}")
-                clone_shape_feature(doc, f"Single_Container_A{i}", single_shape_i, x, y, insert_z,
+                single_shape_i = make_single_container(part_label(i))
+                clone_shape_feature(doc, f"Single_Container_{part_label_name(i)}", single_shape_i, x, y, insert_z,
                                     color=(0.40, 0.85, 0.55), transparency=45)
         else:
             x, y = centres[0]
-            single_shape = make_single_container("A1")
-            clone_shape_feature(doc, "Single_Container_A1", single_shape, x, y, insert_z,
+            single_shape = make_single_container(part_label(1))
+            clone_shape_feature(doc, f"Single_Container_{part_label_name(1)}", single_shape, x, y, insert_z,
                                 color=(0.40, 0.85, 0.55), transparency=45)
 
         if P.add_four_basket_copies:
             for i, (x, y) in enumerate(centres, start=1):
-                basket_shape_i = make_basket(f"A{i}")
-                clone_shape_feature(doc, f"Basket_A{i}", basket_shape_i, x, y, basket_z,
+                basket_shape_i = make_basket(part_label(i))
+                clone_shape_feature(doc, f"Basket_{part_label_name(i)}", basket_shape_i, x, y, basket_z,
                                     color=(0.95, 0.75, 0.35), transparency=15)
         else:
             x, y = centres[0]
-            basket_shape = make_basket("A1")
-            clone_shape_feature(doc, "Basket_A1", basket_shape, x, y, basket_z,
+            basket_shape = make_basket(part_label(1))
+            clone_shape_feature(doc, f"Basket_{part_label_name(1)}", basket_shape, x, y, basket_z,
                                 color=(0.95, 0.75, 0.35), transparency=15)
 
         if P.add_reference_parts_to_side:
             x_ref = effective_main_outer_length() / 2.0 + 50.0
-            clone_shape_feature(doc, "Reference_Single_Container_A1", make_single_container("A1"), x_ref, -20.0, 0.0,
+            clone_shape_feature(doc, f"Reference_Single_Container_{part_label_name(1)}", make_single_container(part_label(1)), x_ref, -20.0, 0.0,
                                 color=(0.40, 0.85, 0.55), transparency=25)
-            clone_shape_feature(doc, "Reference_Basket_A1", make_basket("A1"), x_ref, 25.0, 0.0,
+            clone_shape_feature(doc, f"Reference_Basket_{part_label_name(1)}", make_basket(part_label(1)), x_ref, 25.0, 0.0,
                                 color=(0.95, 0.75, 0.35), transparency=5)
             if modular_slots_enabled():
                 clone_shape_feature(doc, "Reference_Modular_Key_EW", modular_connector_key_shape("EW"), x_ref, 50.0, 0.0,
@@ -2932,6 +2991,7 @@ def create_document():
     App.Console.PrintMessage(f"Opening side margins: X={effective_main_opening_side_margin_x():.1f} mm, Y={effective_main_opening_side_margin_y():.1f} mm\n")
     App.Console.PrintMessage(f"Single-container seat recess depth: {main_single_container_recess_depth():.1f} mm\n")
     App.Console.PrintMessage(f"Physical central column enabled: {physical_central_column_enabled()}\n")
+    App.Console.PrintMessage(f"Part label prefix: {part_label_prefix()} -> {part_label(1)}-{part_label(4)}\n")
     if show_array:
         total_modules = max(1, int(P.modular_array_count_x)) * max(1, int(P.modular_array_count_y))
         App.Console.PrintMessage(f"Modular preview: {P.modular_array_count_x} x {P.modular_array_count_y} modules = {total_modules * 4} plant openings\n")
