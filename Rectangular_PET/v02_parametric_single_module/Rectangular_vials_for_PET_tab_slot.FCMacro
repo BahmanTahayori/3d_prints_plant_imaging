@@ -19,6 +19,13 @@ Revision v27 — configurable part-label prefix:
   - Stroke text now supports seven-segment-style uppercase letters, so non-A
     prefixes such as C are visible in STL/STEP exports.
 
+Revision v28 — fixed lower main-container wall thickness:
+  - Adds main_side_wall_thickness, default 4 mm. This controls the lower
+    internal liquid-volume wall thickness without changing the generated outer
+    dimensions. The lower internal cavity is shaved from the inside, increasing
+    the usable inner volume while preserving the top openings, recesses, dish,
+    baskets, single containers, bolt/nut fasteners, and labels.
+
 Revision v26 — explicit bolt/pin position inset parameters:
   - Adds alignment_pin_position_mode and explicit X/Y inset-from-outer-edge
     parameters so the four alignment bolts can be moved farther from the outside
@@ -171,6 +178,14 @@ class P:
     auto_expand_main_height_to_single = True
     main_bottom_thickness = 2.0   # closed bottom; no cut reaches below this plane
     main_min_wall_thickness = 3.5 # minimum outside perimeter wall; extra space stays as wall
+
+    # Lower main-container side-wall thickness.
+    # This controls the wall thickness of the LOWER internal liquid-volume cavity.
+    # It is shaved from the inside only: the generated outside dimensions stay
+    # unchanged, while the inner liquid volume expands/contracts to leave this
+    # wall thickness. The top openings, flange recesses, dish, baskets, and
+    # single-container dimensions are not changed by this parameter.
+    main_side_wall_thickness = 4.0
 
     # Explicit clear solid margin OUTSIDE the single-container flange recess/seat.
     # These values are measured from the outer edge of the recess/counterbore to
@@ -428,8 +443,8 @@ class P:
     # so they should export with STL/STEP without a FreeCAD font dependency.
     # Default is engraved/recessed, not raised, so stacked parts sit flat.
     # Change this to "C" for C1-C4, "B" for B1-B4, etc.
-    part_label_prefix = "C -"
-    enable_part_labels = True
+    part_label_prefix = "C - "
+    enable_part_labels = False
     label_style = "engraved"        # "engraved" or "raised"
     label_depth = 2              # cut depth for engraved labels, mm
     label_raised_height = 0.30      # extrusion height if label_style="raised", mm
@@ -437,7 +452,7 @@ class P:
     # Small default labels fit on narrow top frame/flange strips.
     main_label_scale = 0.40
     single_label_scale = 0.40
-    basket_label_scale = 0.8
+    basket_label_scale = 0.4
     dish_label_scale = 0.40
 
     # Volume/capacity marks. 1 mL = 1000 mm^3. Marks are nominal geometric
@@ -472,8 +487,8 @@ class P:
 
     # What to build/display. Default macro view is intentionally simple:
     # Main_Container, Dish, one Single_Container_A1, and one Basket_A1.
-    add_four_insert_copies = True
-    add_four_basket_copies = False
+    add_four_insert_copies = False
+    add_four_basket_copies = True
     add_reference_parts_to_side = False
     create_mating_dimensions_note = False
 
@@ -577,6 +592,28 @@ def main_bay_length():
 def main_bay_width():
     """Overall span of the 2 x 2 opening group, including the top bridges."""
     return 2.0 * main_opening_width() + effective_opening_gap_y()
+
+
+def main_side_wall_thickness():
+    """Lower internal side-wall thickness of the main container.
+
+    This is an inside-only change: effective_main_outer_length()/width() are not
+    altered by this value. The lower liquid-volume cavity is expanded inward from
+    the outer walls until this wall thickness remains.
+    """
+    return max(0.05, float(getattr(P, "main_side_wall_thickness", P.main_min_wall_thickness)))
+
+
+def main_lower_cavity_length():
+    return max(0.10, effective_main_outer_length() - 2.0 * main_side_wall_thickness())
+
+
+def main_lower_cavity_width():
+    return max(0.10, effective_main_outer_width() - 2.0 * main_side_wall_thickness())
+
+
+def main_lower_cavity_height():
+    return max(0.0, effective_main_height() - P.main_bottom_thickness - P.main_top_bridge_height)
 
 
 def single_container_recess_enabled():
@@ -1113,6 +1150,17 @@ def validate_parameters():
         )
     if P.main_min_wall_thickness <= 0:
         raise ValueError("main_min_wall_thickness must be positive.")
+    if main_side_wall_thickness() <= 0:
+        raise ValueError("main_side_wall_thickness must be positive.")
+    if 2.0 * main_side_wall_thickness() >= min(effective_main_outer_length(), effective_main_outer_width()):
+        raise ValueError("main_side_wall_thickness is too large for the generated main-container footprint.")
+    if modular_slots_enabled():
+        needed_slot_backwall = float(P.modular_slot_depth) + float(P.modular_slot_min_back_wall)
+        if main_side_wall_thickness() < needed_slot_backwall - 1e-6:
+            raise ValueError(
+                "main_side_wall_thickness is too small for the modular side slots; "
+                f"use >= {needed_slot_backwall:.2f} mm or reduce modular_slot_depth/back-wall."
+            )
     if float(getattr(P, "main_opening_side_margin_x", 0.0)) <= 0 or float(getattr(P, "main_opening_side_margin_y", 0.0)) <= 0:
         raise ValueError("main_opening_side_margin_x/y must be positive.")
     if single_container_recess_enabled():
@@ -1659,21 +1707,16 @@ def opening_rectangles():
 
 
 def main_lower_cross_section_area_mm2():
-    rects = opening_rectangles()
-    if P.connect_main_wells_internally:
-        channel_x = effective_opening_gap_x() + 2.0 * P.main_connection_overlap
-        channel_y = effective_opening_gap_y() + 2.0 * P.main_connection_overlap
-        rects.append((-channel_x / 2.0, channel_x / 2.0, -main_bay_width() / 2.0, main_bay_width() / 2.0))
-        rects.append((-main_bay_length() / 2.0, main_bay_length() / 2.0, -channel_y / 2.0, channel_y / 2.0))
-    area = rectangle_union_area(rects)
+    # Lower chamber geometry is now governed by main_side_wall_thickness: the
+    # outside dimensions remain fixed, and the internal liquid cavity is shaved
+    # from the inside to leave that wall thickness. This keeps volume estimates
+    # consistent with the generated lower cavity.
+    area = main_lower_cavity_length() * main_lower_cavity_width()
     if physical_central_column_enabled():
         # Nominal displacement of the solid column within the connected lower area.
         area -= math.pi * (P.central_column_diameter / 2.0) ** 2
-        # The blind bore is a small extra liquid volume above central_column_bore_bottom_z.
-        # It is intentionally ignored for side calibration marks because the side mark
-        # should mainly represent visible tray/well level rather than tube pre-fill.
+        # The blind bore is intentionally ignored for side calibration marks.
     return max(0.0, area)
-
 
 def main_upper_cross_section_area_mm2():
     # Above the internal communication channel, only the four top opening columns are open.
@@ -2591,6 +2634,19 @@ def make_main_container():
                                     P.main_bottom_thickness,
                                     x, y))
 
+    # Lower internal liquid-volume cavity. This shaves the side walls from the
+    # inside only, so the outside dimensions remain unchanged while the lower
+    # content volume expands to leave P.main_side_wall_thickness. The top
+    # bridge/rib region is preserved so the four top openings and flange recesses
+    # remain unchanged.
+    lower_cavity_h = main_lower_cavity_height()
+    if lower_cavity_h > 0:
+        cutters.append(box_centered(main_lower_cavity_length(),
+                                    main_lower_cavity_width(),
+                                    lower_cavity_h,
+                                    P.main_bottom_thickness,
+                                    0.0, 0.0))
+
     # Shallow top seat/counterbore for the removable single-container flange.
     # This larger recess does not go through the part; the smaller through-opening
     # below remains the ledge that stops the insert from falling into the holder.
@@ -3000,6 +3056,7 @@ def create_document():
     App.Console.PrintMessage(f"Volume bars/labels omitted above top {P.volume_mark_top_exclusion_mm:.1f} mm zone.\n")
     App.Console.PrintMessage(f"Main single-container recess depth: {main_single_container_recess_depth():.2f} mm\n")
     App.Console.PrintMessage(f"Effective main height: {effective_main_height():.2f} mm\n")
+    App.Console.PrintMessage(f"Main lower side-wall thickness: {main_side_wall_thickness():.2f} mm\n")
     if P.enable_alignment_pins:
         App.Console.PrintMessage(f"Alignment fastener style: {getattr(P, 'alignment_fastener_style', 'pin')}\n")
         App.Console.PrintMessage(f"Alignment position mode: {alignment_pin_position_mode()}\n")
