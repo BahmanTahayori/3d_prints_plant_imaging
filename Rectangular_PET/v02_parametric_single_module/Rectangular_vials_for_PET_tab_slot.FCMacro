@@ -286,8 +286,8 @@ class P:
     basket_corner_fillet = 0.9
 
     # Basket perforations/slots
-    basket_bottom_slot_length = 3.0
-    basket_bottom_slot_width = 2.0
+    basket_bottom_slot_length = 4.0
+    basket_bottom_slot_width = 3.0
     basket_bottom_slot_pitch_x = 5.0
     basket_bottom_slot_pitch_y = 4.0
     basket_side_slot_length = .01
