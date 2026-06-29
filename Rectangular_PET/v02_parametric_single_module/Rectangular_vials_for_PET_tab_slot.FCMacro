@@ -11,6 +11,13 @@ Creates:
      and a central fill/access hole above the hollow column.
   4) Basket: one removable plant basket design carried by the dish.
 
+Revision v29 — vertical hollow dish handles:
+  - Adds a vertical hollow/loop handle style for the dish. The handle is made
+    from two upright posts plus a top bridge, leaving an open grip window.
+  - The handle can be placed on both X ends as before, but now rises vertically
+    above the dish instead of being a flat horizontal tab.
+  - The old flat-tab handle remains available with dish_handle_style="flat_tab".
+
 Revision v27 — configurable part-label prefix:
   - Adds part_label_prefix so generated part IDs can be changed from A1-A4
     to C1-C4, B1-B4, R1-R4, etc., without editing label-generation code.
@@ -241,7 +248,7 @@ class P:
     # basket-lip layout. False keeps the older behaviour where dish_outer_length/width
     # act as minimum dimensions.
     auto_fit_dish_outer_xy_to_layout = True
-    dish_outer_overhang = 2.0
+    dish_outer_overhang = 0.0
     dish_min_edge_margin = 2.0     # minimum dish material outside window/recess features, mm
     dish_thickness = 3
     dish_basket_lip_recess_depth = 1.6
@@ -298,7 +305,7 @@ class P:
     # Alignment pins only. Pins are inside the main footprint, placed on solid
     # perimeter/rib material outside the single-container openings. Matching holes
     # are cut into the dish. No external main-container lugs are added.
-    enable_alignment_pins = True
+    enable_alignment_pins = False
     alignment_pin_count = 4            # 2 = front/back internal pins; 4 also adds left/right internal pins
     alignment_pin_diameter = 2.5
     alignment_pin_height = 8
@@ -347,7 +354,15 @@ class P:
     dish_handle_both_ends = True
     dish_handle_length = 20.0
     dish_handle_width = 40.0
-    dish_handle_overlap = 1.0
+    dish_handle_overlap = 0.0
+    # Dish handle style. "flat_tab" keeps the old horizontal end tabs.
+    # "vertical_hollow" creates an upright handle/loop with an open central grip.
+    dish_handle_style = "vertical_hollow"
+    dish_vertical_handle_height = 22.0       # vertical rise above dish top, mm
+    dish_vertical_handle_wall = 3.0         # Y-post width and top-bridge height, mm
+    dish_vertical_handle_thickness_x = 4.0  # front/back thickness of the handle frame, mm
+    dish_vertical_handle_inset_from_end = 1.0  # keeps upright handle inside the dish footprint, mm
+    dish_vertical_handle_base_penetration = 0.20  # slight overlap into dish for robust fuse, mm
 
     # Parametric-box-style modular main-container connector system.
     # All modules are identical/genderless. Curved dovetail slots are NARROW at
@@ -1632,10 +1647,64 @@ def clone_shape_feature(doc, name, source_shape, x=0.0, y=0.0, z=0.0, color=None
     return add_feature(doc, name, source_shape, pl, color, transparency)
 
 
+def dish_handle_style():
+    return str(getattr(P, "dish_handle_style", "flat_tab")).strip().lower()
+
+
 def dish_handle_shape(zmin, height):
-    """Optional handle tab(s) for the dish only; the main box stays rectangular."""
+    """Optional handle(s) for the dish only; the main box stays rectangular.
+
+    Styles:
+      - flat_tab: old horizontal solid tabs at the X ends of the dish.
+      - vertical_hollow: upright U/loop handles at the X ends. The opening is
+        hollow because the geometry is made from two side posts plus a top bridge,
+        rather than a solid plate.
+    """
     if not P.enable_dish_handle:
         return None
+
+    style = dish_handle_style()
+    if style in {"vertical", "vertical_hollow", "upright", "upright_hollow", "loop"}:
+        L = effective_dish_outer_length()
+        W = effective_dish_outer_width()
+        span_y = min(float(P.dish_handle_width), max(1.0, W - 1.0))
+        frame_wall = max(0.5, float(getattr(P, "dish_vertical_handle_wall", 3.0)))
+        x_thick = max(0.5, float(getattr(P, "dish_vertical_handle_thickness_x", 4.0)))
+        handle_h = max(frame_wall + 1.0, float(getattr(P, "dish_vertical_handle_height", 22.0)))
+        inset = max(0.0, float(getattr(P, "dish_vertical_handle_inset_from_end", 1.0)))
+        penetration = max(0.0, float(getattr(P, "dish_vertical_handle_base_penetration", 0.20)))
+
+        # Keep the handle frame physically valid and ensure the central grip is open.
+        post_w = min(frame_wall, span_y / 2.0 - 0.25)
+        if post_w <= 0.2:
+            raise ValueError("dish_handle_width is too small for the vertical hollow handle posts.")
+        top_bar_h = min(frame_wall, handle_h - 0.5)
+
+        z_post = float(P.dish_thickness) - penetration
+        post_h = handle_h + penetration
+        z_top_bar = float(P.dish_thickness) + handle_h - top_bar_h
+
+        def one_vertical_handle(sign):
+            x_center = sign * (L / 2.0 - inset - x_thick / 2.0)
+            if abs(x_center) + x_thick / 2.0 > L / 2.0 + 1e-6:
+                raise ValueError("Vertical dish handle is outside the dish footprint; increase dish_outer_length or reduce dish_vertical_handle_thickness_x/inset.")
+            y_abs = span_y / 2.0 - post_w / 2.0
+            shapes = [
+                box_centered(x_thick, post_w, post_h, z_post, x_center, -y_abs),
+                box_centered(x_thick, post_w, post_h, z_post, x_center,  y_abs),
+                box_centered(x_thick, span_y, top_bar_h, z_top_bar, x_center, 0.0),
+            ]
+            return fuse_many(shapes)
+
+        handles = [one_vertical_handle(1.0)]
+        if P.dish_handle_both_ends:
+            handles.append(one_vertical_handle(-1.0))
+        return fuse_many(handles)
+
+    if style not in {"flat", "flat_tab", "tab", "horizontal"}:
+        raise ValueError("dish_handle_style must be 'flat_tab' or 'vertical_hollow'.")
+
+    # Legacy flat horizontal tab handle.
     L = effective_dish_outer_length()
     handle_len = P.dish_handle_length + P.dish_handle_overlap
     x_abs = L / 2.0 + (P.dish_handle_length - P.dish_handle_overlap) / 2.0
@@ -3046,6 +3115,7 @@ def create_document():
     App.Console.PrintMessage(f"Main-container nominal capacity: {main_container_capacity_ml():.1f} mL\n")
     App.Console.PrintMessage(f"Opening side margins: X={effective_main_opening_side_margin_x():.1f} mm, Y={effective_main_opening_side_margin_y():.1f} mm\n")
     App.Console.PrintMessage(f"Single-container seat recess depth: {main_single_container_recess_depth():.1f} mm\n")
+    App.Console.PrintMessage(f"Dish handle style: {dish_handle_style()}\n")
     App.Console.PrintMessage(f"Physical central column enabled: {physical_central_column_enabled()}\n")
     App.Console.PrintMessage(f"Part label prefix: {part_label_prefix()} -> {part_label(1)}-{part_label(4)}\n")
     if show_array:
