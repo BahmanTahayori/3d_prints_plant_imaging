@@ -2,20 +2,21 @@
 """
 FreeCAD macro based on the user's latest working luer-lock/cuboid version.
 
-Revision v23:
-  - Keeps the reinforced luer-lock + cuboid + flush edge logic.
-  - Closes the distal end of the extension tube.
-  - Replaces the rounded slots with four more rectangular side openings.
-  - The rectangular openings begin exactly at the distal closed-end/cap
-    interface of the extension tube and run 5 mm back along the tube body.
-  - The cutters still enter at 45 degrees to the tube axis and are distributed
-    at 90 degree intervals around the tube.
+Revision v26:
+  - Uses the user's latest v23/v24 parameter set as the base.
+  - Disables the old extension tube path by default.
+  - Adds a centred hollow cylindrical pipe directly to the cuboid.
+  - Keeps the v25 corrected pipe placement on the OPPOSITE side from the cuboid hollow/open side.
+  - The pipe lumen is cut by the same central through-hole cutter, so the pipe
+    is hollow and aligned with the luer passage.
+  - Adds configurable rectangular side openings to the new centred cuboid pipe.
+  - By default, four openings are distributed equally around the pipe and begin
+    at the distal end, extending back along the pipe wall.
 
 Notes:
   - The original STEP geometry is preserved for the luer-lock shape.
-  - The extension tube is fused first, then the central lumen is cut, stopping
-    short of the distal tip so the tube end remains closed.
-  - The side openings are cut afterwards so the lumen can vent through them.
+  - The old extension tube and distal side-opening parameters are retained for
+    compatibility but are inactive by default in this v25 version.
 """
 
 import os
@@ -47,18 +48,43 @@ class P:
     # Central open passage.
     through_hole_diameter = 4.0
 
-    # Extension tube.
-    add_hole_extension_tube = True
-    extension_tube_length = 50.0
+    # Old extension tube. Disabled in v25 because the printed extension was loose.
+    # The old parameters are kept for compatibility, but the new cuboid-centred
+    # hollow pipe below is now the recommended outlet.
+    add_hole_extension_tube = False
+    extension_tube_length = 0
     extension_tube_outer_diameter = 4.5
     extension_tube_overlap = 3.60
     extension_side = "z_max"
 
-    # New in v23: close distal end and add 4 angled rectangular-ish openings at
+    # v25: centred hollow pipe fused directly to the cuboid.
+    add_centered_cuboid_pipe = True
+    # Options: "opposite_to_hollow_open_side", "hollow_open_side",
+    # "same_as_luer_top", "opposite_to_luer_top", "z_min", "z_max".
+    # v25 default corrects the v24 placement by putting the pipe on the
+    # opposite side of the cuboid hollow/open face.
+    centered_cuboid_pipe_side = "opposite_to_hollow_open_side"
+    centered_cuboid_pipe_length = 20.0
+    centered_cuboid_pipe_outer_diameter = 7
+    centered_cuboid_pipe_inner_diameter = 4
+    centered_cuboid_pipe_overlap_into_cuboid = 1.2
+
+    # v26: side openings/windows in the new centred cuboid pipe.
+    # These are separate from the old extension-tube openings below.
+    add_centered_pipe_side_openings = True
+    centered_pipe_side_opening_count = 4
+    centered_pipe_side_opening_style = "rectangular"
+    centered_pipe_side_opening_width = 2       # tangential width of each side opening, mm
+    centered_pipe_side_opening_height = 10.0      # axial length of opening along the pipe, mm
+    centered_pipe_side_opening_offset_from_distal_end = 0.0  # 0 = starts at the pipe tip/end
+    centered_pipe_side_opening_cut_length = 25.0 # radial cutter depth through pipe wall, mm
+    centered_pipe_side_opening_outside_margin = 1.4
+
+    # Legacy v23: close distal end and add 4 angled rectangular-ish openings at
     # the very distal/bottom end of the extension tube, where the tube meets the cap.
-    close_extension_tube_end = True
+    close_extension_tube_end = False
     extension_end_cap_thickness = 1.0
-    add_extension_side_openings = True
+    add_extension_side_openings = False
     extension_side_opening_count = 4
     extension_side_opening_style = "rectangular"
     extension_side_opening_diameter = 1.4   # rectangular opening width
@@ -395,6 +421,83 @@ def _add_flush_edge_to_cuboid_face(cuboid, x, y, cuboid_zmin, cuboid_zmax, open_
     return fuse_many([cuboid, frame])
 
 
+
+
+def _cuboid_pipe_side_opens_toward_zmax(luer_top_side, hollow_open_toward_zmax):
+    """Resolve which cuboid face receives the new centred pipe."""
+    mode = str(getattr(P, "centered_cuboid_pipe_side", "opposite_to_hollow_open_side")).strip().lower()
+    luer_ref_is_zmax = _side_is_z_max(luer_top_side)
+    if mode in {"hollow", "hollow_side", "hollow_open_side", "same_as_hollow_open_side"}:
+        return bool(hollow_open_toward_zmax)
+    if mode in {"opposite_hollow", "opposite_to_hollow", "opposite_to_hollow_open_side"}:
+        return not bool(hollow_open_toward_zmax)
+    if mode in {"same", "same_as_luer_top", "luer_top"}:
+        return luer_ref_is_zmax
+    if mode in {"opposite", "opposite_to_luer_top", "other"}:
+        return not luer_ref_is_zmax
+    if mode in {"z_max", "top", "upper", "max", "up"}:
+        return True
+    if mode in {"z_min", "bottom", "lower", "min", "down"}:
+        return False
+    raise ValueError("centered_cuboid_pipe_side must be 'hollow_open_side', 'opposite_to_hollow_open_side', 'z_min', or 'z_max'.")
+
+
+def _add_centered_cuboid_pipe(cuboid, x, y, cuboid_zmin, cuboid_zmax, luer_top_side, hollow_open_toward_zmax):
+    """Add a hollow pipe centered on the cuboid/luer axis.
+
+    The pipe is fused as an outer cylinder only. Its inner lumen is cut later by
+    cut_through_hole(), using centered_cuboid_pipe_inner_diameter when enabled.
+    """
+    if not bool(getattr(P, "add_centered_cuboid_pipe", False)):
+        BUILD_META["has_centered_cuboid_pipe"] = False
+        return cuboid
+
+    length = float(getattr(P, "centered_cuboid_pipe_length", 20.0))
+    outer_d = float(getattr(P, "centered_cuboid_pipe_outer_diameter", 6.0))
+    inner_d = float(getattr(P, "centered_cuboid_pipe_inner_diameter", getattr(P, "through_hole_diameter", 4.0)))
+    overlap = max(0.0, float(getattr(P, "centered_cuboid_pipe_overlap_into_cuboid", 1.0)))
+
+    if length <= 0:
+        BUILD_META["has_centered_cuboid_pipe"] = False
+        return cuboid
+    if outer_d <= inner_d + 0.2:
+        console(
+            "Warning: centered_cuboid_pipe_outer_diameter is close to the inner diameter; "
+            "increase it for a stronger printable pipe wall."
+        )
+
+    pipe_toward_zmax = _cuboid_pipe_side_opens_toward_zmax(
+        luer_top_side,
+        hollow_open_toward_zmax,
+    )
+    if pipe_toward_zmax:
+        pipe_zmin = cuboid_zmax - overlap
+        pipe_zmax = cuboid_zmax + length
+    else:
+        pipe_zmin = cuboid_zmin - length
+        pipe_zmax = cuboid_zmin + overlap
+
+    pipe = cylinder_z(outer_d, pipe_zmax - pipe_zmin, pipe_zmin, x, y)
+    BUILD_META.update({
+        "has_centered_cuboid_pipe": True,
+        "centered_cuboid_pipe_inner_diameter": inner_d,
+        "centered_cuboid_pipe_outer_diameter": outer_d,
+        "centered_cuboid_pipe_length": length,
+        "centered_cuboid_pipe_zmin": pipe_zmin,
+        "centered_cuboid_pipe_zmax": pipe_zmax,
+        "centered_cuboid_pipe_distal_end_z": pipe_zmax if pipe_toward_zmax else pipe_zmin,
+        "centered_cuboid_pipe_join_face_z": cuboid_zmax if pipe_toward_zmax else cuboid_zmin,
+        "centered_cuboid_pipe_center_x": x,
+        "centered_cuboid_pipe_center_y": y,
+        "centered_cuboid_pipe_side_zmax": pipe_toward_zmax,
+    })
+    console(
+        "Centered cuboid pipe added: "
+        f"OD={outer_d:.2f} mm, ID={inner_d:.2f} mm, length={length:.2f} mm, "
+        f"overlap={overlap:.2f} mm, side={'z_max' if pipe_toward_zmax else 'z_min'}"
+    )
+    return fuse_many([cuboid, pipe])
+
 def add_surrounding_cuboid(shape, luer_reference_shape):
     if not getattr(P, "add_surrounding_cuboid", True):
         return shape
@@ -450,6 +553,10 @@ def add_surrounding_cuboid(shape, luer_reference_shape):
             cuboid = fuse_many([cuboid] + reinforcers)
 
     cuboid = _add_flush_edge_to_cuboid_face(cuboid, x, y, cuboid_zmin, cuboid_zmax, open_toward_zmax)
+
+    cuboid = _add_centered_cuboid_pipe(
+        cuboid, x, y, cuboid_zmin, cuboid_zmax, side, open_toward_zmax
+    )
 
     BUILD_META.update({
         "cuboid_zmin": cuboid_zmin,
@@ -568,12 +675,76 @@ def _make_side_opening_cutters(shape):
 
     return cutters
 
+
+def _make_centered_pipe_side_opening_cutters(shape):
+    """Create rectangular side openings in the new centred cuboid pipe.
+
+    These openings are for P.add_centered_cuboid_pipe, not for the legacy
+    extension tube.  The default creates four equally spaced rectangular windows
+    at the distal end of the pipe, extending back along the pipe axis.
+    """
+    if not (BUILD_META.get("has_centered_cuboid_pipe", False) and bool(getattr(P, "add_centered_pipe_side_openings", False))):
+        return []
+
+    count = int(getattr(P, "centered_pipe_side_opening_count", 4))
+    if count <= 0:
+        return []
+
+    opening_width = float(getattr(P, "centered_pipe_side_opening_width", 1.4))
+    opening_height = float(getattr(P, "centered_pipe_side_opening_height", 5.0))
+    offset_from_distal = max(0.0, float(getattr(P, "centered_pipe_side_opening_offset_from_distal_end", 0.0)))
+    cut_length = float(getattr(P, "centered_pipe_side_opening_cut_length", 12.0))
+    outside_margin = max(0.1, float(getattr(P, "centered_pipe_side_opening_outside_margin", 1.4)))
+
+    if opening_width <= 0 or opening_height <= 0 or cut_length <= 0:
+        return []
+
+    outer_r = 0.5 * float(BUILD_META["centered_cuboid_pipe_outer_diameter"])
+    x = float(BUILD_META["centered_cuboid_pipe_center_x"])
+    y = float(BUILD_META["centered_cuboid_pipe_center_y"])
+    pipe_toward_zmax = bool(BUILD_META.get("centered_cuboid_pipe_side_zmax", False))
+    distal_z = float(BUILD_META["centered_cuboid_pipe_distal_end_z"])
+
+    # Direction from the distal pipe end back toward the cuboid body.
+    body_sign = -1.0 if pipe_toward_zmax else 1.0
+    start_z = distal_z + body_sign * offset_from_distal
+    h_axis = App.Vector(0, 0, body_sign)
+
+    cutters = []
+    start_offset = outer_r + outside_margin
+    for i in range(count):
+        theta = 2.0 * math.pi * i / float(count)
+        radial = App.Vector(math.cos(theta), math.sin(theta), 0)
+        tangent = App.Vector(-math.sin(theta), math.cos(theta), 0)
+
+        # Rectangular cutter travels radially inward through the pipe wall.
+        cut_axis = App.Vector(-radial.x, -radial.y, 0)
+        start_center = App.Vector(
+            x + radial.x * start_offset,
+            y + radial.y * start_offset,
+            start_z,
+        )
+
+        a_vec = App.Vector(cut_axis.x * cut_length, cut_axis.y * cut_length, cut_axis.z * cut_length)
+        b_vec = App.Vector(tangent.x * opening_width, tangent.y * opening_width, tangent.z * opening_width)
+        c_vec = App.Vector(h_axis.x * opening_height, h_axis.y * opening_height, h_axis.z * opening_height)
+        p0 = start_center - App.Vector(b_vec.x * 0.5, b_vec.y * 0.5, b_vec.z * 0.5)
+        cutters.append(_make_parallelepiped_from_corner(p0, a_vec, b_vec, c_vec))
+
+    return cutters
+
+
 def cut_through_hole(shape):
     bb = shape.BoundBox
     x, y = central_axis_xy(shape)
     cutters = []
 
-    # Main central lumen.
+    # Main central lumen. If the v25 centered cuboid pipe is enabled, use its
+    # explicit inner diameter so the new pipe is hollow and aligned.
+    central_lumen_d = float(getattr(P, "through_hole_diameter", 4.0))
+    if BUILD_META.get("has_centered_cuboid_pipe", False):
+        central_lumen_d = float(BUILD_META.get("centered_cuboid_pipe_inner_diameter", central_lumen_d))
+
     if getattr(P, "add_hole_extension_tube", True) and BUILD_META.get("has_extension", False) and getattr(P, "close_extension_tube_end", True):
         cap_t = float(getattr(P, "extension_end_cap_thickness", 1.0))
         side = BUILD_META["extension_side"]
@@ -585,17 +756,20 @@ def cut_through_hole(shape):
         else:
             hole_z0 = zmin_tube + cap_t
             hole_z1 = bb.ZMax + 2.0
-        cutters.append(cylinder_z(P.through_hole_diameter, max(0.1, hole_z1 - hole_z0), hole_z0, x, y))
+        cutters.append(cylinder_z(central_lumen_d, max(0.1, hole_z1 - hole_z0), hole_z0, x, y))
     else:
-        cutters.append(cylinder_z(P.through_hole_diameter, bb.ZLength + 4.0, bb.ZMin - 2.0, x, y))
+        cutters.append(cylinder_z(central_lumen_d, bb.ZLength + 4.0, bb.ZMin - 2.0, x, y))
 
     if getattr(P, "add_top_lead_in", False):
         cutters.append(cylinder_z(P.top_lead_in_diameter, float(P.top_lead_in_depth) + 0.1, bb.ZMax - float(P.top_lead_in_depth), x, y))
     if getattr(P, "add_bottom_lead_in", False):
         cutters.append(cylinder_z(P.bottom_lead_in_diameter, float(P.bottom_lead_in_depth) + 0.1, bb.ZMin - 0.05, x, y))
 
-    # Four angled side openings near distal end of extension tube.
+    # Four angled side openings near distal end of the legacy extension tube.
     cutters.extend(_make_side_opening_cutters(shape))
+
+    # v26: side openings in the new centred cuboid pipe.
+    cutters.extend(_make_centered_pipe_side_opening_cutters(shape))
 
     return cut_many(shape, cutters)
 
@@ -630,12 +804,12 @@ def maybe_export(doc, obj):
     os.makedirs(P.export_dir, exist_ok=True)
     if getattr(P, "export_step", False):
         import Import
-        path = os.path.join(P.export_dir, "luer_lock_v23.step")
+        path = os.path.join(P.export_dir, "luer_lock_v26_centered_cuboid_pipe_with_side_openings.step")
         Import.export([obj], path)
         console(f"Exported STEP: {path}")
     if getattr(P, "export_stl", False):
         import Mesh
-        path = os.path.join(P.export_dir, "luer_lock_v23.stl")
+        path = os.path.join(P.export_dir, "luer_lock_v26_centered_cuboid_pipe_with_side_openings.stl")
         Mesh.export([obj], path)
         console(f"Exported STL: {path}")
 
@@ -643,22 +817,37 @@ def maybe_export(doc, obj):
 def create_document():
     step_path = find_source_step_path()
     console(f"Using source STEP: {step_path}")
-    doc = App.newDocument("Luer_Lock_V23")
+    doc = App.newDocument("Luer_Lock_V25_Centered_Cuboid_Pipe")
     source = import_step_as_shape(doc, step_path)
     cropped = crop_to_desired_luerlock_side(source)
     extended = add_extension_tube(cropped)
     cuboid_added = add_surrounding_cuboid(extended, cropped)
     holed = cut_through_hole(cuboid_added)
     final_shape = normalize_shape(holed)
-    obj = add_feature(doc, "Luer_Lock_V23", final_shape, color=(0.72, 0.76, 0.78), transparency=0)
+    obj = add_feature(doc, "Luer_Lock_V25_Centered_Cuboid_Pipe", final_shape, color=(0.72, 0.76, 0.78), transparency=0)
     doc.recompute()
     bb = final_shape.BoundBox
-    console("Created luer-lock geometry with cuboid, closed-end extension tube, and 4 rectangular bottom side openings.")
+    console("Created luer-lock geometry with cuboid, centered hollow cuboid pipe on corrected side, and pipe side openings.")
     console(f"Final size: {bb.XLength:.3f} x {bb.YLength:.3f} x {bb.ZLength:.3f} mm")
     console(f"Through-hole diameter: {float(P.through_hole_diameter):.3f} mm")
-    console(f"Extension tube OD={float(P.extension_tube_outer_diameter):.3f} mm, length={float(P.extension_tube_length):.3f} mm")
+    console(f"Old extension tube enabled: {bool(getattr(P, 'add_hole_extension_tube', False))}; OD={float(P.extension_tube_outer_diameter):.3f} mm, length={float(P.extension_tube_length):.3f} mm")
+    if BUILD_META.get("has_centered_cuboid_pipe", False):
+        console(
+            f"Centered cuboid pipe OD={float(BUILD_META.get('centered_cuboid_pipe_outer_diameter', 0)):.3f} mm, "
+            f"ID={float(BUILD_META.get('centered_cuboid_pipe_inner_diameter', 0)):.3f} mm, "
+            f"length={float(BUILD_META.get('centered_cuboid_pipe_length', 0)):.3f} mm, "
+            f"side={'z_max' if BUILD_META.get('centered_cuboid_pipe_side_zmax', False) else 'z_min'}"
+        )
+        if bool(getattr(P, "add_centered_pipe_side_openings", False)):
+            console(
+                f"Centered pipe side openings: count={int(getattr(P, 'centered_pipe_side_opening_count', 4))}, "
+                f"width={float(getattr(P, 'centered_pipe_side_opening_width', 1.4)):.3f} mm, "
+                f"height={float(getattr(P, 'centered_pipe_side_opening_height', 5.0)):.3f} mm, "
+                f"offset from distal end={float(getattr(P, 'centered_pipe_side_opening_offset_from_distal_end', 0.0)):.3f} mm"
+            )
     console(f"Extension end closed: {bool(getattr(P, 'close_extension_tube_end', True))}, cap thickness={float(getattr(P, 'extension_end_cap_thickness', 1.0)):.3f} mm")
-    console(f"Bottom rectangular openings: count={int(getattr(P, 'extension_side_opening_count', 4))}, width={float(getattr(P, 'extension_side_opening_diameter', 1.4)):.3f} mm, angle={float(getattr(P, 'extension_side_opening_angle_deg', 45.0)):.1f} deg, height from cap interface={float(getattr(P, 'extension_side_opening_height', 5.0)):.3f} mm")
+    if bool(getattr(P, "add_extension_side_openings", False)):
+        console(f"Legacy extension rectangular openings: count={int(getattr(P, 'extension_side_opening_count', 4))}, width={float(getattr(P, 'extension_side_opening_diameter', 1.4)):.3f} mm, angle={float(getattr(P, 'extension_side_opening_angle_deg', 45.0)):.1f} deg, height from cap interface={float(getattr(P, 'extension_side_opening_height', 5.0)):.3f} mm")
     if Gui is not None:
         Gui.ActiveDocument.ActiveView.viewAxonometric()
         Gui.SendMsgToActiveView("ViewFit")

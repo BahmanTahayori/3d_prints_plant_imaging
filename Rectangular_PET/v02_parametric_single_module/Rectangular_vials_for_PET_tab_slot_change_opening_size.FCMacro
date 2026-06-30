@@ -266,6 +266,53 @@ class P:
     dish_central_square_recess_side_clearance = 0.75  # recess is 0.5 mm larger on each side
     dish_central_square_recess_depth = 1.0           # recess depth into top of dish
 
+    # v36 simple acrylic U-clip trial on ONE long side of ONE dish opening.
+    # The older full-perimeter acrylic guide/U-channel experiments are disabled.
+    # This version adds only two short U-shaped clips, each 10 mm long, fused
+    # directly to the dish. The dish itself acts as the bottom of the U; the two
+    # raised side walls leave an internal gap for a 2 mm acrylic sheet.
+    enable_acrylic_u_channels = False          # disable older full-perimeter v35 U-channels
+    enable_acrylic_window_guides = False       # disable older v34 rail/groove trial
+    show_acrylic_u_sheet_preview = False
+
+    enable_simple_acrylic_u_clips = True
+    simple_acrylic_u_clip_opening_index = 1    # 1=lower-left, 2=lower-right, 3=upper-left, 4=upper-right
+    simple_acrylic_u_clip_side = "outer_long_side"
+    simple_acrylic_u_clip_count = 2
+    simple_acrylic_u_clip_length = 10.0        # each U clip length, mm
+    simple_acrylic_u_clip_offset_from_center = 0.0  # 0 = auto-place clips symmetrically along the long side
+
+    acrylic_sheet_thickness = 2.0              # reference sheet thickness, mm
+    simple_acrylic_u_clip_inner_gap = 2.1      # empty internal U gap; use 2.1-2.2 mm for 2 mm acrylic
+    simple_acrylic_u_clip_wall_thickness = 2.0
+    simple_acrylic_u_clip_height = 14.0         # height above dish top, mm
+    simple_acrylic_u_clip_base_groove_depth = 0.0
+    simple_acrylic_u_clip_clearance_from_basket_recess = 3.0
+
+    # v37: one bolt/screw hole through each U-clip.
+    # The hole runs across the U gap, through both clip walls and the acrylic sheet.
+    simple_acrylic_u_clip_add_bolt_holes = True
+    simple_acrylic_u_clip_bolt_hole_diameter = 4      # e.g. M2 clearance; adjust for your screw
+    simple_acrylic_u_clip_bolt_hole_height_above_dish = 10.0  # centre of hole above dish top, mm
+    simple_acrylic_u_clip_bolt_hole_x_offset = 0.0      # 0 = centred along each 10 mm U-clip
+    simple_acrylic_u_clip_bolt_hole_extra_length = 2.0  # cutter margin beyond U walls, mm
+
+    # v38: symmetric acrylic U-clips around all four dish openings.
+    # These use the SAME U dimensions above: 10 mm length, 2.1 mm gap,
+    # 2 mm wall, 14 mm height, and the same bolt-hole settings.
+    # Clips are fused into the dish; no separate acrylic/clip parts are created.
+    enable_symmetric_acrylic_u_clips = True
+    symmetric_acrylic_u_clip_opening_indices = (1, 2, 3, 4)
+    symmetric_acrylic_u_clip_sides = ("N", "S", "E", "W")  # all sides of each selected opening
+    symmetric_acrylic_u_clip_count_long_side = 2   # N/S sides; clips run along X
+    symmetric_acrylic_u_clip_count_short_side = 2  # E/W sides; clips run along Y
+    # v39: when two openings share the same strip/rib between them, create only
+    # ONE shared pair of U clips in that strip, not two pairs from both openings.
+    symmetric_acrylic_u_clip_share_internal_sides = True
+    symmetric_acrylic_u_clip_internal_side_count = 2
+    symmetric_acrylic_u_clip_long_side_offset_from_center = 0.0   # 0 = auto-symmetric
+    symmetric_acrylic_u_clip_short_side_offset_from_center = 0.0  # 0 = auto-symmetric
+
     # Basket: lower body passes through dish window; top lip rests on dish and is carried by it.
     # By default, basket footprint follows the single-container body, so one change
     # updates the single insert, main opening, basket, and dish window together.
@@ -361,12 +408,12 @@ class P:
     enable_dish_handle = True
     dish_handle_both_ends = True
     dish_handle_length = 20.0
-    dish_handle_width = 40.0
+    dish_handle_width = 20.0
     dish_handle_overlap = 0.0
     # Dish handle style. "flat_tab" keeps the old horizontal end tabs.
     # "vertical_hollow" creates an upright handle/loop with an open central grip.
     dish_handle_style = "vertical_hollow"
-    dish_vertical_handle_height = 15.0       # vertical rise above dish top, mm
+    dish_vertical_handle_height = 25.0       # vertical rise above dish top, mm
     dish_vertical_handle_wall = 3.0         # Y-post width and top-bridge height, mm
     dish_vertical_handle_thickness_x = 3.0  # front/back thickness of the handle frame, mm
     dish_vertical_handle_inset_from_end = 0.0  # keeps upright handle inside the dish footprint, mm
@@ -3797,6 +3844,1548 @@ def validate_parameters():
                     "The 15 mm central square recess/opening overlaps a basket window. "
                     "Increase opening_gap_x/opening_gap_y or reduce the central square size/recess."
                 )
+
+
+
+# -----------------------------------------------------------------------------
+# Revision v34 overrides — acrylic-window guide trial around one dish opening
+# -----------------------------------------------------------------------------
+# Adds a shallow rectangular groove plus raised guide rails around selected dish
+# basket opening(s) for 2 mm acrylic sheet. The small central square opening is
+# intentionally untouched. Defaults apply the feature to opening 1 only.
+
+_make_dish_v33 = make_dish
+_validate_parameters_v33 = validate_parameters
+_create_document_v33 = create_document
+
+
+def acrylic_window_guides_enabled():
+    return bool(getattr(P, "enable_acrylic_window_guides", False))
+
+
+def acrylic_window_indices():
+    raw = getattr(P, "acrylic_window_opening_indices", (1,))
+    if isinstance(raw, int):
+        raw = (raw,)
+    if isinstance(raw, str):
+        raw = raw.replace(",", " ").split()
+    out = []
+    for item in raw:
+        try:
+            idx = int(item)
+        except Exception:
+            continue
+        if 1 <= idx <= 4 and idx not in out:
+            out.append(idx)
+    return out or [1]
+
+
+def acrylic_sheet_thickness():
+    return max(0.10, float(getattr(P, "acrylic_sheet_thickness", 2.0)))
+
+
+def acrylic_sheet_slot_width():
+    return acrylic_sheet_thickness() + max(0.0, float(getattr(P, "acrylic_sheet_slot_clearance", 0.30)))
+
+
+def acrylic_window_slot_depth():
+    return max(0.0, float(getattr(P, "acrylic_window_slot_depth", 1.0)))
+
+
+def acrylic_window_guide_height():
+    return max(0.0, float(getattr(P, "acrylic_window_guide_height", 3.0)))
+
+
+def acrylic_window_guide_rail_width():
+    return max(0.05, float(getattr(P, "acrylic_window_guide_rail_width", 1.0)))
+
+
+def acrylic_window_clearance_from_basket_recess():
+    return max(0.0, float(getattr(P, "acrylic_window_clearance_from_basket_recess", 0.8)))
+
+
+def acrylic_window_corner_overlap():
+    return max(0.0, float(getattr(P, "acrylic_window_corner_overlap", 3.0)))
+
+
+def acrylic_window_sheet_preview_enabled():
+    return bool(getattr(P, "show_acrylic_window_sheet_preview", True))
+
+
+def acrylic_window_sheet_preview_height():
+    return max(0.5, float(getattr(P, "acrylic_window_sheet_preview_height", 16.0)))
+
+
+def acrylic_window_seat_length():
+    """Use the basket-lip recess footprint, not the smaller through-window.
+
+    This keeps the acrylic guide outside the basket seat so it should not block
+    the basket lip from sitting in the dish recess.
+    """
+    return effective_basket_lip_length() + float(P.dish_basket_lip_recess_clearance)
+
+
+def acrylic_window_seat_width():
+    return effective_basket_lip_width() + float(P.dish_basket_lip_recess_clearance)
+
+
+def _acrylic_window_side_geometry(x, y, include_preview=False):
+    """Return (cutters, rails_or_preview) for one opening centre.
+
+    Geometry is in the dish's local coordinate system: the dish top is at
+    z=P.dish_thickness. Each side has a shallow groove cut into the top surface,
+    plus two raised rails that create a slot for nominal 2 mm acrylic sheet.
+    """
+    seat_l = acrylic_window_seat_length()
+    seat_w = acrylic_window_seat_width()
+    slot_w = acrylic_sheet_slot_width()
+    sheet_t = acrylic_sheet_thickness()
+    slot_depth = acrylic_window_slot_depth()
+    rail_w = acrylic_window_guide_rail_width()
+    rail_h = acrylic_window_guide_height()
+    gap = acrylic_window_clearance_from_basket_recess()
+    corner_ov = acrylic_window_corner_overlap()
+
+    cutters = []
+    solids = []
+    z_top = float(P.dish_thickness)
+    z_slot = z_top - slot_depth
+    base_overlap = min(0.20, max(0.0, rail_h) * 0.20)
+    rail_z = z_top - base_overlap
+    rail_height = rail_h + base_overlap
+    side_len_x = seat_l + 2.0 * corner_ov
+    side_len_y = seat_w + 2.0 * corner_ov
+
+    # ±X sides: channels run parallel to Y.
+    for sign in (-1.0, 1.0):
+        edge_x = x + sign * seat_l / 2.0
+        inner_rail_x = edge_x + sign * (gap + rail_w / 2.0)
+        slot_x = edge_x + sign * (gap + rail_w + slot_w / 2.0)
+        outer_rail_x = edge_x + sign * (gap + rail_w + slot_w + rail_w / 2.0)
+
+        if include_preview:
+            solids.append(box_centered(sheet_t, side_len_y, acrylic_window_sheet_preview_height(),
+                                       z_top - slot_depth, slot_x, y))
+        else:
+            if slot_depth > 0:
+                cutters.append(box_centered(slot_w, side_len_y, slot_depth + 0.08,
+                                            z_slot, slot_x, y))
+            if rail_h > 0:
+                solids.append(box_centered(rail_w, side_len_y, rail_height,
+                                           rail_z, inner_rail_x, y))
+                solids.append(box_centered(rail_w, side_len_y, rail_height,
+                                           rail_z, outer_rail_x, y))
+
+    # ±Y sides: channels run parallel to X.
+    for sign in (-1.0, 1.0):
+        edge_y = y + sign * seat_w / 2.0
+        inner_rail_y = edge_y + sign * (gap + rail_w / 2.0)
+        slot_y = edge_y + sign * (gap + rail_w + slot_w / 2.0)
+        outer_rail_y = edge_y + sign * (gap + rail_w + slot_w + rail_w / 2.0)
+
+        if include_preview:
+            solids.append(box_centered(side_len_x, sheet_t, acrylic_window_sheet_preview_height(),
+                                       z_top - slot_depth, x, slot_y))
+        else:
+            if slot_depth > 0:
+                cutters.append(box_centered(side_len_x, slot_w, slot_depth + 0.08,
+                                            z_slot, x, slot_y))
+            if rail_h > 0:
+                solids.append(box_centered(side_len_x, rail_w, rail_height,
+                                           rail_z, x, inner_rail_y))
+                solids.append(box_centered(side_len_x, rail_w, rail_height,
+                                           rail_z, x, outer_rail_y))
+
+    return cutters, solids
+
+
+def acrylic_window_guide_shapes():
+    cutters = []
+    rails = []
+    centres = opening_centres()
+    for idx in acrylic_window_indices():
+        x, y = centres[idx - 1]
+        c, r = _acrylic_window_side_geometry(x, y, include_preview=False)
+        cutters.extend(c)
+        rails.extend(r)
+    return cutters, rails
+
+
+def make_acrylic_window_preview_shape():
+    preview_shapes = []
+    centres = opening_centres()
+    for idx in acrylic_window_indices():
+        x, y = centres[idx - 1]
+        _, sheets = _acrylic_window_side_geometry(x, y, include_preview=True)
+        preview_shapes.extend(sheets)
+    if not preview_shapes:
+        return None
+    return fuse_many(preview_shapes)
+
+
+def make_dish():
+    """v34 dish: v33 dish plus acrylic-sheet guide trial around one opening."""
+    shape = _make_dish_v33()
+    if not acrylic_window_guides_enabled():
+        return shape
+
+    cutters, rails = acrylic_window_guide_shapes()
+    if cutters:
+        shape = cut_many(shape, cutters)
+    if rails:
+        shape = fuse_many([shape] + rails)
+    return safe_fillet(shape, P.fillet_radius)
+
+
+def validate_parameters():
+    _validate_parameters_v33()
+    if not acrylic_window_guides_enabled():
+        return
+
+    if not acrylic_window_indices():
+        raise ValueError("acrylic_window_opening_indices must contain at least one index from 1 to 4.")
+    if acrylic_sheet_thickness() <= 0:
+        raise ValueError("acrylic_sheet_thickness must be positive.")
+    if acrylic_sheet_slot_width() <= acrylic_sheet_thickness() - 1e-6:
+        raise ValueError("acrylic_sheet_slot_clearance must not make the slot smaller than the sheet.")
+    if acrylic_window_slot_depth() >= float(P.dish_thickness) - 0.05:
+        raise ValueError("acrylic_window_slot_depth must be smaller than dish_thickness.")
+    if acrylic_window_guide_height() <= 0 and acrylic_window_slot_depth() <= 0:
+        raise ValueError("Use either a positive acrylic_window_guide_height or a positive acrylic_window_slot_depth.")
+
+    # Check that the guide footprint remains on the dish plate.
+    seat_l = acrylic_window_seat_length()
+    seat_w = acrylic_window_seat_width()
+    total_out_x = seat_l / 2.0 + acrylic_window_clearance_from_basket_recess() + 2.0 * acrylic_window_guide_rail_width() + acrylic_sheet_slot_width()
+    total_out_y = seat_w / 2.0 + acrylic_window_clearance_from_basket_recess() + 2.0 * acrylic_window_guide_rail_width() + acrylic_sheet_slot_width()
+    dish_half_l = effective_dish_outer_length() / 2.0
+    dish_half_w = effective_dish_outer_width() / 2.0
+    for idx in acrylic_window_indices():
+        x, y = opening_centres()[idx - 1]
+        if abs(x) + total_out_x > dish_half_l + 1e-6:
+            raise ValueError(
+                "Acrylic guide for opening %d exceeds the dish length. Reduce acrylic_window_clearance_from_basket_recess, "
+                "rail/slot width, or increase dish size." % idx
+            )
+        if abs(y) + total_out_y > dish_half_w + 1e-6:
+            raise ValueError(
+                "Acrylic guide for opening %d exceeds the dish width. Reduce acrylic_window_clearance_from_basket_recess, "
+                "rail/slot width, or increase dish size." % idx
+            )
+
+
+def create_document():
+    """Create the normal assembly and optionally add transparent acrylic previews."""
+    doc = _create_document_v33()
+    if acrylic_window_guides_enabled() and acrylic_window_sheet_preview_enabled():
+        preview = make_acrylic_window_preview_shape()
+        if preview is not None:
+            dish_z = main_dish_support_z() + float(P.z_clearance)
+            add_feature(
+                doc,
+                "Acrylic_Window_Preview_Opening_%s" % "_".join(str(i) for i in acrylic_window_indices()),
+                preview,
+                App.Placement(App.Vector(0, 0, dish_z), App.Rotation()),
+                color=(0.65, 0.90, 1.00),
+                transparency=65,
+            )
+            doc.recompute()
+    return doc
+
+
+
+# -----------------------------------------------------------------------------
+# Revision v35 overrides — upright U-channels for acrylic sheets around one opening
+# -----------------------------------------------------------------------------
+# This replaces the v34 rail/groove trial with the clarified design:
+#   - A separate U-channel is placed along each of the four sides of a selected
+#     dish basket opening.
+#   - The empty internal gap of the U-channel is user-controlled; default 2.2 mm
+#     for a nominal 2.0 mm acrylic sheet.
+#   - Horizontal holes are cut through the U-channel walls and the acrylic-sheet
+#     path so the user can drill matching holes in the acrylic and pin/screw it.
+#   - The small central square opening is not touched.
+#   - Defaults apply to opening 1 only for a first test.
+
+
+def acrylic_u_channels_enabled():
+    return bool(getattr(P, "enable_acrylic_u_channels", True))
+
+
+def acrylic_u_channel_indices():
+    raw = getattr(P, "acrylic_u_channel_opening_indices", (1,))
+    if isinstance(raw, int):
+        raw = (raw,)
+    if isinstance(raw, str):
+        raw = raw.replace(",", " ").split()
+    out = []
+    for item in raw:
+        try:
+            idx = int(item)
+        except Exception:
+            continue
+        if 1 <= idx <= 4 and idx not in out:
+            out.append(idx)
+    return out or [1]
+
+
+def acrylic_u_sheet_thickness():
+    return max(0.10, float(getattr(P, "acrylic_sheet_thickness", 2.0)))
+
+
+def acrylic_u_inner_gap():
+    return max(0.10, float(getattr(P, "acrylic_u_channel_inner_gap", 2.2)))
+
+
+def acrylic_u_wall_thickness():
+    return max(0.20, float(getattr(P, "acrylic_u_channel_wall_thickness", 1.2)))
+
+
+def acrylic_u_channel_height():
+    return max(0.20, float(getattr(P, "acrylic_u_channel_height", 5.0)))
+
+
+def acrylic_u_base_groove_depth():
+    return max(0.0, float(getattr(P, "acrylic_u_channel_base_groove_depth", 0.5)))
+
+
+def acrylic_u_clearance_from_basket_recess():
+    return max(0.0, float(getattr(P, "acrylic_u_channel_clearance_from_basket_recess", 0.8)))
+
+
+def acrylic_u_corner_overlap():
+    return max(0.0, float(getattr(P, "acrylic_u_channel_corner_overlap", 3.0)))
+
+
+def acrylic_u_holes_per_side():
+    return max(0, int(getattr(P, "acrylic_u_channel_holes_per_side", 2)))
+
+
+def acrylic_u_hole_diameter():
+    return max(0.0, float(getattr(P, "acrylic_u_channel_hole_diameter", 1.6)))
+
+
+def acrylic_u_hole_height_above_dish():
+    return max(0.0, float(getattr(P, "acrylic_u_channel_hole_height_above_dish", 2.7)))
+
+
+def acrylic_u_hole_end_margin():
+    return max(0.0, float(getattr(P, "acrylic_u_channel_hole_end_margin", 5.0)))
+
+
+def acrylic_u_hole_extra_length():
+    return max(0.0, float(getattr(P, "acrylic_u_channel_hole_extra_length", 1.0)))
+
+
+def acrylic_u_preview_enabled():
+    return bool(getattr(P, "show_acrylic_u_sheet_preview", True))
+
+
+def acrylic_u_preview_height():
+    return max(0.5, float(getattr(P, "acrylic_u_sheet_preview_height", 18.0)))
+
+
+def acrylic_u_seat_length():
+    """Use the basket-lip recess footprint as the protected opening footprint."""
+    return effective_basket_lip_length() + float(P.dish_basket_lip_recess_clearance)
+
+
+def acrylic_u_seat_width():
+    return effective_basket_lip_width() + float(P.dish_basket_lip_recess_clearance)
+
+
+def _positions_along_channel(length, count, end_margin):
+    """Hole offsets along one U-channel side, centred and avoiding the ends."""
+    count = max(0, int(count))
+    if count <= 0:
+        return []
+    length = max(0.0, float(length))
+    end_margin = max(0.0, float(end_margin))
+    usable = max(0.0, length - 2.0 * end_margin)
+    if count == 1 or usable <= 0.01:
+        return [0.0]
+    return [(-usable / 2.0 + i * usable / float(count - 1)) for i in range(count)]
+
+
+def _acrylic_u_channel_geometry_for_opening(x, y, include_preview=False):
+    """Return (dish_cutters, solids, hole_cutters, preview_sheets) for one opening.
+
+    Local dish coordinates are used. The dish top surface is z=P.dish_thickness.
+    For each side of the selected opening, two raised walls form a U-channel.
+    The empty gap between those walls is acrylic_u_channel_inner_gap.
+    """
+    seat_l = acrylic_u_seat_length()
+    seat_w = acrylic_u_seat_width()
+    gap = acrylic_u_inner_gap()
+    wall = acrylic_u_wall_thickness()
+    height = acrylic_u_channel_height()
+    groove_depth = acrylic_u_base_groove_depth()
+    clearance = acrylic_u_clearance_from_basket_recess()
+    corner_ov = acrylic_u_corner_overlap()
+    hole_d = acrylic_u_hole_diameter()
+    hole_count = acrylic_u_holes_per_side()
+    hole_extra = acrylic_u_hole_extra_length()
+
+    z_top = float(P.dish_thickness)
+    base_overlap = min(0.20, height * 0.15)
+    wall_z = z_top - base_overlap
+    wall_h = height + base_overlap
+    groove_z = z_top - groove_depth
+    hole_z = z_top + acrylic_u_hole_height_above_dish()
+
+    # The U-channel length extends beyond the basket-lip recess so the side
+    # brackets visually meet/overlap near the corners.
+    side_len_x = seat_l + 2.0 * corner_ov  # used by N/S channels, length along X
+    side_len_y = seat_w + 2.0 * corner_ov  # used by E/W channels, length along Y
+
+    dish_cutters = []
+    solids = []
+    hole_cutters = []
+    preview_sheets = []
+
+    # ±X sides: U-channel runs along Y, sheet lies in a vertical Y-Z plane.
+    for sign in (-1.0, 1.0):
+        edge_x = x + sign * seat_l / 2.0
+        inner_wall_x = edge_x + sign * (clearance + wall / 2.0)
+        slot_x = edge_x + sign * (clearance + wall + gap / 2.0)
+        outer_wall_x = edge_x + sign * (clearance + wall + gap + wall / 2.0)
+
+        if groove_depth > 0:
+            dish_cutters.append(box_centered(gap, side_len_y, groove_depth + 0.08,
+                                             groove_z, slot_x, y))
+
+        solids.append(box_centered(wall, side_len_y, wall_h, wall_z, inner_wall_x, y))
+        solids.append(box_centered(wall, side_len_y, wall_h, wall_z, outer_wall_x, y))
+
+        if include_preview:
+            sheet_t = min(acrylic_u_sheet_thickness(), gap)
+            preview_sheets.append(box_centered(sheet_t, side_len_y, acrylic_u_preview_height() + groove_depth,
+                                               z_top - groove_depth, slot_x, y))
+
+        if hole_count > 0 and hole_d > 0:
+            hole_len = 2.0 * wall + gap + 2.0 * hole_extra
+            for off in _positions_along_channel(side_len_y, hole_count, acrylic_u_hole_end_margin()):
+                hole_cutters.append(cylinder_x(hole_d, hole_len, hole_z, slot_x, y + off))
+
+    # ±Y sides: U-channel runs along X, sheet lies in a vertical X-Z plane.
+    for sign in (-1.0, 1.0):
+        edge_y = y + sign * seat_w / 2.0
+        inner_wall_y = edge_y + sign * (clearance + wall / 2.0)
+        slot_y = edge_y + sign * (clearance + wall + gap / 2.0)
+        outer_wall_y = edge_y + sign * (clearance + wall + gap + wall / 2.0)
+
+        if groove_depth > 0:
+            dish_cutters.append(box_centered(side_len_x, gap, groove_depth + 0.08,
+                                             groove_z, x, slot_y))
+
+        solids.append(box_centered(side_len_x, wall, wall_h, wall_z, x, inner_wall_y))
+        solids.append(box_centered(side_len_x, wall, wall_h, wall_z, x, outer_wall_y))
+
+        if include_preview:
+            sheet_t = min(acrylic_u_sheet_thickness(), gap)
+            preview_sheets.append(box_centered(side_len_x, sheet_t, acrylic_u_preview_height() + groove_depth,
+                                               z_top - groove_depth, x, slot_y))
+
+        if hole_count > 0 and hole_d > 0:
+            hole_len = 2.0 * wall + gap + 2.0 * hole_extra
+            for off in _positions_along_channel(side_len_x, hole_count, acrylic_u_hole_end_margin()):
+                hole_cutters.append(cylinder_y(hole_d, hole_len, hole_z, x + off, slot_y))
+
+    return dish_cutters, solids, hole_cutters, preview_sheets
+
+
+def acrylic_u_channel_shapes():
+    dish_cutters = []
+    solids = []
+    hole_cutters = []
+    centres = opening_centres()
+    for idx in acrylic_u_channel_indices():
+        x, y = centres[idx - 1]
+        c, s, h, _ = _acrylic_u_channel_geometry_for_opening(x, y, include_preview=False)
+        dish_cutters.extend(c)
+        solids.extend(s)
+        hole_cutters.extend(h)
+    return dish_cutters, solids, hole_cutters
+
+
+def make_acrylic_u_sheet_preview_shape():
+    preview_sheets = []
+    hole_cutters = []
+    centres = opening_centres()
+    for idx in acrylic_u_channel_indices():
+        x, y = centres[idx - 1]
+        _, _, h, p = _acrylic_u_channel_geometry_for_opening(x, y, include_preview=True)
+        hole_cutters.extend(h)
+        preview_sheets.extend(p)
+    if not preview_sheets:
+        return None
+    preview = fuse_many(preview_sheets)
+    if hole_cutters:
+        preview = cut_many(preview, hole_cutters)
+    return safe_remove_splitter(preview)
+
+
+def make_dish():
+    """v35 dish: v33 dish plus U-channel acrylic holders around selected opening(s)."""
+    # Use the v33 dish as the base. This avoids the earlier v34 simple rail trial.
+    shape = _make_dish_v33()
+    if not acrylic_u_channels_enabled():
+        return shape
+
+    dish_cutters, solids, hole_cutters = acrylic_u_channel_shapes()
+    if dish_cutters:
+        shape = cut_many(shape, dish_cutters)
+    if solids:
+        shape = fuse_many([shape] + solids)
+    if hole_cutters:
+        shape = cut_many(shape, hole_cutters)
+    return safe_fillet(shape, P.fillet_radius)
+
+
+def validate_parameters():
+    _validate_parameters_v33()
+    if not acrylic_u_channels_enabled():
+        return
+
+    if not acrylic_u_channel_indices():
+        raise ValueError("acrylic_u_channel_opening_indices must contain at least one index from 1 to 4.")
+    if acrylic_u_inner_gap() < acrylic_u_sheet_thickness() - 1e-6:
+        raise ValueError(
+            "acrylic_u_channel_inner_gap is smaller than acrylic_sheet_thickness. "
+            "Use about 2.1-2.2 mm for a 2.0 mm sheet."
+        )
+    if acrylic_u_base_groove_depth() >= float(P.dish_thickness) - 0.05:
+        raise ValueError("acrylic_u_channel_base_groove_depth must be smaller than dish_thickness.")
+    if acrylic_u_hole_diameter() > 0:
+        if acrylic_u_hole_height_above_dish() <= acrylic_u_hole_diameter() / 2.0:
+            raise ValueError("acrylic_u_channel_hole_height_above_dish is too low; the hole may cut into the dish top.")
+        if acrylic_u_hole_height_above_dish() >= acrylic_u_channel_height() - acrylic_u_hole_diameter() / 2.0:
+            raise ValueError("acrylic_u_channel_hole_height_above_dish is too high for the U-channel wall height.")
+
+    seat_l = acrylic_u_seat_length()
+    seat_w = acrylic_u_seat_width()
+    out_x = seat_l / 2.0 + acrylic_u_clearance_from_basket_recess() + 2.0 * acrylic_u_wall_thickness() + acrylic_u_inner_gap()
+    out_y = seat_w / 2.0 + acrylic_u_clearance_from_basket_recess() + 2.0 * acrylic_u_wall_thickness() + acrylic_u_inner_gap()
+    ext_x = max(out_x, seat_l / 2.0 + acrylic_u_corner_overlap())
+    ext_y = max(out_y, seat_w / 2.0 + acrylic_u_corner_overlap())
+    dish_half_l = effective_dish_outer_length() / 2.0
+    dish_half_w = effective_dish_outer_width() / 2.0
+    for idx in acrylic_u_channel_indices():
+        x, y = opening_centres()[idx - 1]
+        if abs(x) + ext_x > dish_half_l + 1e-6:
+            raise ValueError(
+                "Acrylic U-channel for opening %d exceeds the dish length. Reduce wall/gap/clearance/corner overlap "
+                "or increase dish size." % idx
+            )
+        if abs(y) + ext_y > dish_half_w + 1e-6:
+            raise ValueError(
+                "Acrylic U-channel for opening %d exceeds the dish width. Reduce wall/gap/clearance/corner overlap "
+                "or increase dish size." % idx
+            )
+
+
+def create_document():
+    """Create the assembly and optionally add transparent acrylic-sheet previews."""
+    doc = _create_document_v33()
+    if acrylic_u_channels_enabled() and acrylic_u_preview_enabled():
+        preview = make_acrylic_u_sheet_preview_shape()
+        if preview is not None:
+            dish_z = main_dish_support_z() + float(P.z_clearance)
+            add_feature(
+                doc,
+                "Acrylic_U_Channel_Sheet_Preview_Opening_%s" % "_".join(str(i) for i in acrylic_u_channel_indices()),
+                preview,
+                App.Placement(App.Vector(0, 0, dish_z), App.Rotation()),
+                color=(0.65, 0.90, 1.00),
+                transparency=65,
+            )
+            doc.recompute()
+    return doc
+
+
+
+# -----------------------------------------------------------------------------
+# Revision v36 overrides — simple two U-clips on one long side; dish-only view
+# -----------------------------------------------------------------------------
+# This simplifies the acrylic holder idea:
+#   - Only two short U-shaped clips are added.
+#   - They are placed on one long side of one selected dish basket opening.
+#   - Each clip is 10 mm long by default.
+#   - The two U walls are fused into the dish; they are not separate parts.
+#   - Only the dish is shown in the FreeCAD document.
+
+# Force older acrylic experiments off in this revision.
+P.enable_acrylic_u_channels = False
+P.enable_acrylic_window_guides = False
+P.show_acrylic_u_sheet_preview = False
+P.show_acrylic_window_sheet_preview = False
+
+
+def simple_acrylic_u_clips_enabled():
+    return bool(getattr(P, "enable_simple_acrylic_u_clips", True))
+
+
+def simple_acrylic_u_clip_opening_index():
+    idx = int(getattr(P, "simple_acrylic_u_clip_opening_index", 1))
+    return max(1, min(4, idx))
+
+
+def simple_acrylic_u_clip_side():
+    return str(getattr(P, "simple_acrylic_u_clip_side", "outer_long_side")).strip().lower()
+
+
+def simple_acrylic_u_clip_count():
+    return max(1, int(getattr(P, "simple_acrylic_u_clip_count", 2)))
+
+
+def simple_acrylic_u_clip_length():
+    return max(0.5, float(getattr(P, "simple_acrylic_u_clip_length", 10.0)))
+
+
+def simple_acrylic_u_clip_offset_from_center(seat_length):
+    manual = float(getattr(P, "simple_acrylic_u_clip_offset_from_center", 0.0))
+    if manual > 0:
+        return manual
+    # Default: place two clips symmetrically at about quarter-span positions.
+    # For a ~38 mm long basket recess, this gives about +/-9.5 mm centres.
+    return max(0.0, float(seat_length) * 0.25)
+
+
+def simple_acrylic_u_inner_gap():
+    return max(0.10, float(getattr(P, "simple_acrylic_u_clip_inner_gap", 2.2)))
+
+
+def simple_acrylic_u_wall_thickness():
+    return max(0.20, float(getattr(P, "simple_acrylic_u_clip_wall_thickness", 1.2)))
+
+
+def simple_acrylic_u_height():
+    return max(0.20, float(getattr(P, "simple_acrylic_u_clip_height", 5.0)))
+
+
+def simple_acrylic_u_base_groove_depth():
+    return max(0.0, float(getattr(P, "simple_acrylic_u_clip_base_groove_depth", 0.3)))
+
+
+def simple_acrylic_u_clearance_from_basket_recess():
+    return max(0.0, float(getattr(P, "simple_acrylic_u_clip_clearance_from_basket_recess", 0.8)))
+
+
+def simple_acrylic_u_seat_length():
+    # Use the basket-lip recess footprint so the clips sit outside the basket seat.
+    return effective_basket_lip_length() + float(P.dish_basket_lip_recess_clearance)
+
+
+def simple_acrylic_u_seat_width():
+    return effective_basket_lip_width() + float(P.dish_basket_lip_recess_clearance)
+
+
+def _simple_acrylic_long_side_sign(opening_y):
+    """Choose which long side gets the clips.
+
+    For opening 1 by default, 'outer_long_side' places the clips on the lower
+    outside long edge. This keeps the trial visually clear and away from the
+    central square opening.
+    """
+    side = simple_acrylic_u_clip_side()
+    if side in {"positive_y", "+y", "upper", "north", "back"}:
+        return 1.0
+    if side in {"negative_y", "-y", "lower", "south", "front"}:
+        return -1.0
+    if side in {"inner_long_side", "inner", "toward_center", "towards_center"}:
+        return -1.0 if float(opening_y) > 0 else 1.0
+    # Default: outer side, away from dish centre.
+    return 1.0 if float(opening_y) >= 0 else -1.0
+
+
+def simple_acrylic_u_clip_shapes_for_opening(x, y):
+    """Return (dish_cutters, solids) for two short U-clips on one long side.
+
+    The long side of the basket opening runs along X. Each U-clip therefore runs
+    along X and grips an acrylic sheet whose thickness lies in Y. The two raised
+    walls are fused into the dish. The shallow groove is optional and only seats
+    the acrylic edge slightly into the dish.
+    """
+    seat_l = simple_acrylic_u_seat_length()
+    seat_w = simple_acrylic_u_seat_width()
+    sign = _simple_acrylic_long_side_sign(y)
+
+    clip_count = simple_acrylic_u_clip_count()
+    clip_len = simple_acrylic_u_clip_length()
+    offset = simple_acrylic_u_clip_offset_from_center(seat_l)
+    gap = simple_acrylic_u_inner_gap()
+    wall = simple_acrylic_u_wall_thickness()
+    height = simple_acrylic_u_height()
+    clearance = simple_acrylic_u_clearance_from_basket_recess()
+    groove_depth = simple_acrylic_u_base_groove_depth()
+
+    z_top = float(P.dish_thickness)
+    base_overlap = min(0.20, height * 0.15)
+    wall_z = z_top - base_overlap
+    wall_h = height + base_overlap
+    groove_z = z_top - groove_depth
+
+    # One long side of the basket-lip recess.
+    edge_y = y + sign * seat_w / 2.0
+    inner_wall_y = edge_y + sign * (clearance + wall / 2.0)
+    slot_y = edge_y + sign * (clearance + wall + gap / 2.0)
+    outer_wall_y = edge_y + sign * (clearance + wall + gap + wall / 2.0)
+
+    if clip_count == 1:
+        centres_x = [x]
+    elif clip_count == 2:
+        centres_x = [x - offset, x + offset]
+    else:
+        # General fallback: distribute clips along the long side while keeping
+        # them within the basket-recess span.
+        usable = max(0.0, seat_l - clip_len)
+        span = min(usable, 2.0 * offset)
+        centres_x = [x - span / 2.0 + i * span / float(clip_count - 1) for i in range(clip_count)]
+
+    dish_cutters = []
+    solids = []
+    for cx in centres_x:
+        if groove_depth > 0:
+            dish_cutters.append(box_centered(
+                clip_len,
+                gap,
+                groove_depth + 0.08,
+                groove_z,
+                cx,
+                slot_y,
+            ))
+
+        # Two vertical side walls. Together with the dish top/groove, they form
+        # the U-shaped acrylic clip. These are fused into the dish body.
+        solids.append(box_centered(clip_len, wall, wall_h, wall_z, cx, inner_wall_y))
+        solids.append(box_centered(clip_len, wall, wall_h, wall_z, cx, outer_wall_y))
+
+    return dish_cutters, solids
+
+
+def make_dish():
+    """v36 dish: v33 dish plus two short fused U-clips on one long side."""
+    shape = _make_dish_v33()
+    if not simple_acrylic_u_clips_enabled():
+        return shape
+
+    x, y = opening_centres()[simple_acrylic_u_clip_opening_index() - 1]
+    dish_cutters, solids = simple_acrylic_u_clip_shapes_for_opening(x, y)
+
+    if dish_cutters:
+        shape = cut_many(shape, dish_cutters)
+    if solids:
+        shape = fuse_many([shape] + solids)
+    return safe_fillet(shape, P.fillet_radius)
+
+
+def validate_parameters():
+    _validate_parameters_v33()
+    if not simple_acrylic_u_clips_enabled():
+        return
+
+    sheet_t = max(0.10, float(getattr(P, "acrylic_sheet_thickness", 2.0)))
+    if simple_acrylic_u_inner_gap() < sheet_t - 1e-6:
+        raise ValueError(
+            "simple_acrylic_u_clip_inner_gap is smaller than acrylic_sheet_thickness. "
+            "Use about 2.1-2.2 mm for a 2.0 mm acrylic sheet."
+        )
+    if simple_acrylic_u_base_groove_depth() >= float(P.dish_thickness) - 0.05:
+        raise ValueError("simple_acrylic_u_clip_base_groove_depth must be smaller than dish_thickness.")
+
+    seat_l = simple_acrylic_u_seat_length()
+    seat_w = simple_acrylic_u_seat_width()
+    clip_len = simple_acrylic_u_clip_length()
+    offset = simple_acrylic_u_clip_offset_from_center(seat_l)
+    if simple_acrylic_u_clip_count() == 2 and (offset + clip_len / 2.0 > seat_l / 2.0 + 0.5):
+        raise ValueError(
+            "The two acrylic U-clips extend too far along the selected long side. "
+            "Reduce simple_acrylic_u_clip_length or simple_acrylic_u_clip_offset_from_center."
+        )
+
+    x, y = opening_centres()[simple_acrylic_u_clip_opening_index() - 1]
+    sign = _simple_acrylic_long_side_sign(y)
+    wall = simple_acrylic_u_wall_thickness()
+    gap = simple_acrylic_u_inner_gap()
+    clearance = simple_acrylic_u_clearance_from_basket_recess()
+    outer_y = y + sign * (seat_w / 2.0 + clearance + 2.0 * wall + gap)
+    clip_x_extent = abs(x) + max(abs(offset) + clip_len / 2.0, clip_len / 2.0)
+
+    if clip_x_extent > effective_dish_outer_length() / 2.0 + 1e-6:
+        raise ValueError("Simple acrylic U-clips exceed dish length; reduce offset/length or increase dish size.")
+    if abs(outer_y) > effective_dish_outer_width() / 2.0 + 1e-6:
+        raise ValueError("Simple acrylic U-clips exceed dish width; reduce wall/gap/clearance or increase dish size.")
+
+
+def create_document():
+    """v36: show only the dish, with fused U-clips."""
+    validate_parameters()
+    doc = App.newDocument("PET_Plant_Dish_Only_V36")
+    dish_shape = make_dish()
+    add_feature(doc, "Dish_Only_With_Two_Acrylic_U_Clips", dish_shape,
+                color=(0.35, 0.55, 0.95), transparency=20)
+
+    App.Console.PrintMessage("Created dish-only v36 with two fused acrylic U-clips on one long side of one opening.\n")
+    App.Console.PrintMessage(
+        f"U-clip opening index: {simple_acrylic_u_clip_opening_index()}, "
+        f"side: {simple_acrylic_u_clip_side()}, count: {simple_acrylic_u_clip_count()}\n"
+    )
+    App.Console.PrintMessage(
+        f"U-clip length: {simple_acrylic_u_clip_length():.2f} mm; "
+        f"inner gap: {simple_acrylic_u_inner_gap():.2f} mm; "
+        f"height: {simple_acrylic_u_height():.2f} mm\n"
+    )
+
+    doc.recompute()
+    if Gui is not None:
+        Gui.ActiveDocument.ActiveView.viewAxonometric()
+        Gui.SendMsgToActiveView("ViewFit")
+    maybe_export(doc)
+    return doc
+
+
+
+# -----------------------------------------------------------------------------
+# Revision v37 overrides — bolt holes through each simple acrylic U-clip
+# -----------------------------------------------------------------------------
+# Adds one horizontal through-hole per U-clip. The hole runs across the U gap,
+# passing through the inner wall, the acrylic-sheet gap, and the outer wall, so a
+# small screw/bolt can clamp the acrylic sheet. The U-clips remain fused to the
+# dish and the document still shows only the dish.
+
+_validate_parameters_v36 = validate_parameters
+
+
+def simple_acrylic_u_bolt_holes_enabled():
+    return bool(getattr(P, "simple_acrylic_u_clip_add_bolt_holes", True))
+
+
+def simple_acrylic_u_bolt_hole_diameter():
+    return max(0.20, float(getattr(P, "simple_acrylic_u_clip_bolt_hole_diameter", 2.4)))
+
+
+def simple_acrylic_u_bolt_hole_height_above_dish():
+    return max(0.0, float(getattr(P, "simple_acrylic_u_clip_bolt_hole_height_above_dish", 7.0)))
+
+
+def simple_acrylic_u_bolt_hole_x_offset():
+    return float(getattr(P, "simple_acrylic_u_clip_bolt_hole_x_offset", 0.0))
+
+
+def simple_acrylic_u_bolt_hole_extra_length():
+    return max(0.0, float(getattr(P, "simple_acrylic_u_clip_bolt_hole_extra_length", 2.0)))
+
+
+def simple_acrylic_u_clip_shapes_for_opening_v37(x, y):
+    """Return (dish_cutters, solids, bolt_hole_cutters) for the simple U-clips.
+
+    The two raised walls form the U. The bolt hole cutter is a horizontal
+    cylinder along Y, centred across the full U width, so it cuts both walls and
+    crosses the acrylic gap.
+    """
+    seat_l = simple_acrylic_u_seat_length()
+    seat_w = simple_acrylic_u_seat_width()
+    sign = _simple_acrylic_long_side_sign(y)
+
+    clip_count = simple_acrylic_u_clip_count()
+    clip_len = simple_acrylic_u_clip_length()
+    offset = simple_acrylic_u_clip_offset_from_center(seat_l)
+    gap = simple_acrylic_u_inner_gap()
+    wall = simple_acrylic_u_wall_thickness()
+    height = simple_acrylic_u_height()
+    clearance = simple_acrylic_u_clearance_from_basket_recess()
+    groove_depth = simple_acrylic_u_base_groove_depth()
+
+    z_top = float(P.dish_thickness)
+    base_overlap = min(0.20, height * 0.15)
+    wall_z = z_top - base_overlap
+    wall_h = height + base_overlap
+    groove_z = z_top - groove_depth
+
+    # One long side of the basket-lip recess.
+    edge_y = y + sign * seat_w / 2.0
+    inner_wall_y = edge_y + sign * (clearance + wall / 2.0)
+    slot_y = edge_y + sign * (clearance + wall + gap / 2.0)
+    outer_wall_y = edge_y + sign * (clearance + wall + gap + wall / 2.0)
+
+    if clip_count == 1:
+        centres_x = [x]
+    elif clip_count == 2:
+        centres_x = [x - offset, x + offset]
+    else:
+        usable = max(0.0, seat_l - clip_len)
+        span = min(usable, 2.0 * offset)
+        centres_x = [x - span / 2.0 + i * span / float(clip_count - 1) for i in range(clip_count)]
+
+    dish_cutters = []
+    solids = []
+    bolt_cutters = []
+
+    bolt_z = z_top + simple_acrylic_u_bolt_hole_height_above_dish()
+    bolt_d = simple_acrylic_u_bolt_hole_diameter()
+    bolt_x_offset = simple_acrylic_u_bolt_hole_x_offset()
+    # Long enough to pass through both U walls and the empty acrylic gap.
+    bolt_len = 2.0 * wall + gap + 2.0 * simple_acrylic_u_bolt_hole_extra_length()
+
+    for cx in centres_x:
+        if groove_depth > 0:
+            dish_cutters.append(box_centered(
+                clip_len,
+                gap,
+                groove_depth + 0.08,
+                groove_z,
+                cx,
+                slot_y,
+            ))
+
+        # Two vertical side walls fused into the dish body.
+        solids.append(box_centered(clip_len, wall, wall_h, wall_z, cx, inner_wall_y))
+        solids.append(box_centered(clip_len, wall, wall_h, wall_z, cx, outer_wall_y))
+
+        if simple_acrylic_u_bolt_holes_enabled():
+            # One through-hole per U-clip. Axis is along Y, crossing the two U
+            # walls and the acrylic-sheet gap.
+            bolt_cutters.append(cylinder_y(
+                bolt_d,
+                bolt_len,
+                bolt_z,
+                cx + bolt_x_offset,
+                slot_y,
+            ))
+
+    return dish_cutters, solids, bolt_cutters
+
+
+def make_dish():
+    """v37 dish: v33 dish plus two short fused U-clips with one bolt hole each."""
+    shape = _make_dish_v33()
+    if not simple_acrylic_u_clips_enabled():
+        return shape
+
+    x, y = opening_centres()[simple_acrylic_u_clip_opening_index() - 1]
+    dish_cutters, solids, bolt_cutters = simple_acrylic_u_clip_shapes_for_opening_v37(x, y)
+
+    if dish_cutters:
+        shape = cut_many(shape, dish_cutters)
+    if solids:
+        shape = fuse_many([shape] + solids)
+    if bolt_cutters:
+        # Cut after fusing the U walls so the holes pass through the final fused body.
+        shape = cut_many(shape, bolt_cutters)
+    return safe_fillet(shape, P.fillet_radius)
+
+
+def validate_parameters():
+    _validate_parameters_v36()
+    if not (simple_acrylic_u_clips_enabled() and simple_acrylic_u_bolt_holes_enabled()):
+        return
+
+    d = simple_acrylic_u_bolt_hole_diameter()
+    h = simple_acrylic_u_height()
+    z = simple_acrylic_u_bolt_hole_height_above_dish()
+    clip_len = simple_acrylic_u_clip_length()
+    x_off = abs(simple_acrylic_u_bolt_hole_x_offset())
+
+    if d >= h - 0.4:
+        raise ValueError("simple_acrylic_u_clip_bolt_hole_diameter is too large for the U-clip height.")
+    if z - d / 2.0 < 0.25:
+        raise ValueError("Bolt hole is too low; increase simple_acrylic_u_clip_bolt_hole_height_above_dish.")
+    if z + d / 2.0 > h + 0.25:
+        raise ValueError("Bolt hole is too high; reduce simple_acrylic_u_clip_bolt_hole_height_above_dish or increase U-clip height.")
+    if x_off + d / 2.0 > clip_len / 2.0 - 0.25:
+        raise ValueError("Bolt hole x-offset places the hole too close to the end of the 10 mm U-clip.")
+
+
+def create_document():
+    """v37: show only the dish, with fused U-clips and bolt holes."""
+    validate_parameters()
+    doc = App.newDocument("PET_Plant_Dish_Only_V37")
+    dish_shape = make_dish()
+    add_feature(doc, "Dish_Only_With_Two_Acrylic_U_Clips_And_Bolt_Holes", dish_shape,
+                color=(0.35, 0.55, 0.95), transparency=20)
+
+    App.Console.PrintMessage("Created dish-only v37 with two fused acrylic U-clips and one bolt hole through each U.\n")
+    App.Console.PrintMessage(
+        f"U-clip opening index: {simple_acrylic_u_clip_opening_index()}, "
+        f"side: {simple_acrylic_u_clip_side()}, count: {simple_acrylic_u_clip_count()}\n"
+    )
+    App.Console.PrintMessage(
+        f"U-clip length: {simple_acrylic_u_clip_length():.2f} mm; "
+        f"inner gap: {simple_acrylic_u_inner_gap():.2f} mm; "
+        f"height: {simple_acrylic_u_height():.2f} mm\n"
+    )
+    if simple_acrylic_u_bolt_holes_enabled():
+        App.Console.PrintMessage(
+            f"Bolt hole diameter: {simple_acrylic_u_bolt_hole_diameter():.2f} mm; "
+            f"height above dish: {simple_acrylic_u_bolt_hole_height_above_dish():.2f} mm\n"
+        )
+
+    doc.recompute()
+    if Gui is not None:
+        Gui.ActiveDocument.ActiveView.viewAxonometric()
+        Gui.SendMsgToActiveView("ViewFit")
+    maybe_export(doc)
+    return doc
+
+
+# -----------------------------------------------------------------------------
+# Revision v38 overrides — symmetric U-clips around all selected dish openings
+# -----------------------------------------------------------------------------
+# Places the same 10 mm U-clips from v37 at symmetric positions around the four
+# basket openings, matching the user's red-rectangle sketch. The U-clips are
+# fused into the dish body, and each U can keep the v37 bolt/screw hole.
+# Only the dish is shown in the document.
+
+# Force older acrylic trials off so only the v38 symmetric layout is generated.
+P.enable_acrylic_u_channels = False
+P.enable_acrylic_window_guides = False
+P.enable_simple_acrylic_u_clips = False
+P.show_acrylic_u_sheet_preview = False
+P.show_acrylic_window_sheet_preview = False
+
+
+def symmetric_acrylic_u_clips_enabled():
+    return bool(getattr(P, "enable_symmetric_acrylic_u_clips", True))
+
+
+def symmetric_acrylic_u_clip_indices():
+    raw = getattr(P, "symmetric_acrylic_u_clip_opening_indices", (1, 2, 3, 4))
+    if isinstance(raw, int):
+        raw = (raw,)
+    if isinstance(raw, str):
+        raw = raw.replace(",", " ").split()
+    out = []
+    for item in raw:
+        try:
+            idx = int(item)
+        except Exception:
+            continue
+        if 1 <= idx <= 4 and idx not in out:
+            out.append(idx)
+    return out or [1, 2, 3, 4]
+
+
+def symmetric_acrylic_u_clip_sides():
+    raw = getattr(P, "symmetric_acrylic_u_clip_sides", ("N", "S", "E", "W"))
+    if isinstance(raw, str):
+        key = raw.strip().lower()
+        if key in {"all", "all_sides", "around", "perimeter"}:
+            return ["N", "S", "E", "W"]
+        if key in {"long", "long_sides", "horizontal"}:
+            return ["N", "S"]
+        if key in {"short", "short_sides", "vertical"}:
+            return ["E", "W"]
+        raw = raw.replace(",", " ").split()
+    out = []
+    mapping = {
+        "N": "N", "NORTH": "N", "+Y": "N", "TOP": "N", "UPPER": "N",
+        "S": "S", "SOUTH": "S", "-Y": "S", "BOTTOM": "S", "LOWER": "S",
+        "E": "E", "EAST": "E", "+X": "E", "RIGHT": "E",
+        "W": "W", "WEST": "W", "-X": "W", "LEFT": "W",
+    }
+    for item in raw:
+        side = mapping.get(str(item).strip().upper())
+        if side and side not in out:
+            out.append(side)
+    return out or ["N", "S", "E", "W"]
+
+
+def symmetric_u_count_for_side(side):
+    side = str(side).upper()
+    if side in {"N", "S"}:
+        return max(1, int(getattr(P, "symmetric_acrylic_u_clip_count_long_side", 2)))
+    return max(1, int(getattr(P, "symmetric_acrylic_u_clip_count_short_side", 2)))
+
+
+def symmetric_u_manual_offset_for_side(side):
+    side = str(side).upper()
+    if side in {"N", "S"}:
+        return max(0.0, float(getattr(P, "symmetric_acrylic_u_clip_long_side_offset_from_center", 0.0)))
+    return max(0.0, float(getattr(P, "symmetric_acrylic_u_clip_short_side_offset_from_center", 0.0)))
+
+
+def _symmetric_u_axis_centres(axis_center, span, count, clip_len, manual_offset):
+    axis_center = float(axis_center)
+    span = float(span)
+    count = max(1, int(count))
+    clip_len = float(clip_len)
+    manual_offset = float(manual_offset)
+    if count == 1:
+        return [axis_center]
+    if count == 2:
+        offset = manual_offset if manual_offset > 0 else max(0.0, span * 0.25)
+        return [axis_center - offset, axis_center + offset]
+
+    # For 3 or more clips, distribute symmetrically within the side span while
+    # keeping clip ends inside the basket-seat/recess footprint.
+    usable_span = max(0.0, span - clip_len)
+    if usable_span <= 1e-6:
+        return [axis_center]
+    return [axis_center - usable_span / 2.0 + i * usable_span / float(count - 1)
+            for i in range(count)]
+
+
+def _u_wall_and_bolt_common():
+    gap = simple_acrylic_u_inner_gap()
+    wall = simple_acrylic_u_wall_thickness()
+    height = simple_acrylic_u_height()
+    clearance = simple_acrylic_u_clearance_from_basket_recess()
+    groove_depth = simple_acrylic_u_base_groove_depth()
+    clip_len = simple_acrylic_u_clip_length()
+    z_top = float(P.dish_thickness)
+    base_overlap = min(0.20, height * 0.15)
+    wall_z = z_top - base_overlap
+    wall_h = height + base_overlap
+    groove_z = z_top - groove_depth
+    bolt_z = z_top + simple_acrylic_u_bolt_hole_height_above_dish()
+    bolt_d = simple_acrylic_u_bolt_hole_diameter()
+    bolt_len = 2.0 * wall + gap + 2.0 * simple_acrylic_u_bolt_hole_extra_length()
+    bolt_axis_offset = simple_acrylic_u_bolt_hole_x_offset()
+    return {
+        "gap": gap,
+        "wall": wall,
+        "height": height,
+        "clearance": clearance,
+        "groove_depth": groove_depth,
+        "clip_len": clip_len,
+        "z_top": z_top,
+        "wall_z": wall_z,
+        "wall_h": wall_h,
+        "groove_z": groove_z,
+        "bolt_z": bolt_z,
+        "bolt_d": bolt_d,
+        "bolt_len": bolt_len,
+        "bolt_axis_offset": bolt_axis_offset,
+    }
+
+
+def symmetric_acrylic_u_clip_shapes_for_side(x, y, side):
+    """Return (dish_cutters, solids, bolt_cutters) for one side of one opening.
+
+    N/S sides run along X and hold an acrylic sheet whose thickness is in Y.
+    E/W sides run along Y and hold an acrylic sheet whose thickness is in X.
+    """
+    side = str(side).strip().upper()
+    seat_l = simple_acrylic_u_seat_length()
+    seat_w = simple_acrylic_u_seat_width()
+    p = _u_wall_and_bolt_common()
+    clip_len = p["clip_len"]
+    gap = p["gap"]
+    wall = p["wall"]
+    clearance = p["clearance"]
+    groove_depth = p["groove_depth"]
+
+    dish_cutters = []
+    solids = []
+    bolt_cutters = []
+
+    if side in {"N", "S"}:
+        sign = 1.0 if side == "N" else -1.0
+        centres = _symmetric_u_axis_centres(
+            x,
+            seat_l,
+            symmetric_u_count_for_side(side),
+            clip_len,
+            symmetric_u_manual_offset_for_side(side),
+        )
+        edge_y = y + sign * seat_w / 2.0
+        inner_wall_y = edge_y + sign * (clearance + wall / 2.0)
+        slot_y = edge_y + sign * (clearance + wall + gap / 2.0)
+        outer_wall_y = edge_y + sign * (clearance + wall + gap + wall / 2.0)
+
+        for cx in centres:
+            if groove_depth > 0:
+                dish_cutters.append(box_centered(
+                    clip_len, gap, groove_depth + 0.08, p["groove_z"], cx, slot_y
+                ))
+            solids.append(box_centered(clip_len, wall, p["wall_h"], p["wall_z"], cx, inner_wall_y))
+            solids.append(box_centered(clip_len, wall, p["wall_h"], p["wall_z"], cx, outer_wall_y))
+            if simple_acrylic_u_bolt_holes_enabled():
+                bolt_cutters.append(cylinder_y(
+                    p["bolt_d"], p["bolt_len"], p["bolt_z"],
+                    cx + p["bolt_axis_offset"], slot_y
+                ))
+        return dish_cutters, solids, bolt_cutters
+
+    if side in {"E", "W"}:
+        sign = 1.0 if side == "E" else -1.0
+        centres = _symmetric_u_axis_centres(
+            y,
+            seat_w,
+            symmetric_u_count_for_side(side),
+            clip_len,
+            symmetric_u_manual_offset_for_side(side),
+        )
+        edge_x = x + sign * seat_l / 2.0
+        inner_wall_x = edge_x + sign * (clearance + wall / 2.0)
+        slot_x = edge_x + sign * (clearance + wall + gap / 2.0)
+        outer_wall_x = edge_x + sign * (clearance + wall + gap + wall / 2.0)
+
+        for cy in centres:
+            if groove_depth > 0:
+                dish_cutters.append(box_centered(
+                    gap, clip_len, groove_depth + 0.08, p["groove_z"], slot_x, cy
+                ))
+            solids.append(box_centered(wall, clip_len, p["wall_h"], p["wall_z"], inner_wall_x, cy))
+            solids.append(box_centered(wall, clip_len, p["wall_h"], p["wall_z"], outer_wall_x, cy))
+            if simple_acrylic_u_bolt_holes_enabled():
+                # For vertical-side clips, the same offset parameter moves the
+                # hole along the clip length, i.e. in Y.
+                bolt_cutters.append(cylinder_x(
+                    p["bolt_d"], p["bolt_len"], p["bolt_z"],
+                    slot_x, cy + p["bolt_axis_offset"]
+                ))
+        return dish_cutters, solids, bolt_cutters
+
+    return dish_cutters, solids, bolt_cutters
+
+
+def symmetric_acrylic_u_clip_all_shapes():
+    dish_cutters = []
+    solids = []
+    bolt_cutters = []
+    centres = opening_centres()
+    sides = symmetric_acrylic_u_clip_sides()
+    for idx in symmetric_acrylic_u_clip_indices():
+        x, y = centres[idx - 1]
+        for side in sides:
+            c, s, b = symmetric_acrylic_u_clip_shapes_for_side(x, y, side)
+            dish_cutters.extend(c)
+            solids.extend(s)
+            bolt_cutters.extend(b)
+    return dish_cutters, solids, bolt_cutters
+
+
+def make_dish():
+    """v38 dish: v33 dish plus symmetric fused U-clips and bolt holes."""
+    shape = _make_dish_v33()
+    if not symmetric_acrylic_u_clips_enabled():
+        return shape
+
+    dish_cutters, solids, bolt_cutters = symmetric_acrylic_u_clip_all_shapes()
+    if dish_cutters:
+        shape = cut_many(shape, dish_cutters)
+    if solids:
+        shape = fuse_many([shape] + solids)
+    if bolt_cutters:
+        shape = cut_many(shape, bolt_cutters)
+    return safe_fillet(shape, P.fillet_radius)
+
+
+def validate_parameters():
+    _validate_parameters_v33()
+    if not symmetric_acrylic_u_clips_enabled():
+        return
+
+    sheet_t = max(0.10, float(getattr(P, "acrylic_sheet_thickness", 2.0)))
+    if simple_acrylic_u_inner_gap() < sheet_t - 1e-6:
+        raise ValueError(
+            "simple_acrylic_u_clip_inner_gap is smaller than acrylic_sheet_thickness. "
+            "Use about 2.1-2.2 mm for a 2.0 mm acrylic sheet."
+        )
+    if simple_acrylic_u_base_groove_depth() >= float(P.dish_thickness) - 0.05:
+        raise ValueError("simple_acrylic_u_clip_base_groove_depth must be smaller than dish_thickness.")
+
+    # Keep bolt holes inside the upright U walls.
+    if simple_acrylic_u_bolt_holes_enabled():
+        d = simple_acrylic_u_bolt_hole_diameter()
+        h = simple_acrylic_u_height()
+        z = simple_acrylic_u_bolt_hole_height_above_dish()
+        clip_len = simple_acrylic_u_clip_length()
+        axis_off = abs(simple_acrylic_u_bolt_hole_x_offset())
+        if d >= h - 0.4:
+            raise ValueError("simple_acrylic_u_clip_bolt_hole_diameter is too large for the U-clip height.")
+        if z - d / 2.0 < 0.25:
+            raise ValueError("Bolt hole is too low; increase simple_acrylic_u_clip_bolt_hole_height_above_dish.")
+        if z + d / 2.0 > h + 0.25:
+            raise ValueError("Bolt hole is too high; reduce simple_acrylic_u_clip_bolt_hole_height_above_dish or increase U-clip height.")
+        if axis_off + d / 2.0 > clip_len / 2.0 - 0.25:
+            raise ValueError("Bolt-hole offset places the hole too close to the end of the 10 mm U-clip.")
+
+    # Conservative footprint check: all U walls must stay inside the dish plate.
+    dish_half_l = effective_dish_outer_length() / 2.0
+    dish_half_w = effective_dish_outer_width() / 2.0
+    seat_l = simple_acrylic_u_seat_length()
+    seat_w = simple_acrylic_u_seat_width()
+    clip_len = simple_acrylic_u_clip_length()
+    wall = simple_acrylic_u_wall_thickness()
+    gap = simple_acrylic_u_inner_gap()
+    clearance = simple_acrylic_u_clearance_from_basket_recess()
+    radial_out = clearance + 2.0 * wall + gap
+
+    for idx in symmetric_acrylic_u_clip_indices():
+        x, y = opening_centres()[idx - 1]
+        for side in symmetric_acrylic_u_clip_sides():
+            side = side.upper()
+            count = symmetric_u_count_for_side(side)
+            manual_offset = symmetric_u_manual_offset_for_side(side)
+            if side in {"N", "S"}:
+                centres_axis = _symmetric_u_axis_centres(x, seat_l, count, clip_len, manual_offset)
+                x_extent = max(abs(cx) + clip_len / 2.0 for cx in centres_axis)
+                y_edge = y + (1.0 if side == "N" else -1.0) * (seat_w / 2.0 + radial_out)
+                if x_extent > dish_half_l + 1e-6:
+                    raise ValueError(f"Symmetric U-clips on opening {idx} exceed dish length.")
+                if abs(y_edge) > dish_half_w + 1e-6:
+                    raise ValueError(f"Symmetric U-clips on opening {idx} exceed dish width.")
+            else:
+                centres_axis = _symmetric_u_axis_centres(y, seat_w, count, clip_len, manual_offset)
+                y_extent = max(abs(cy) + clip_len / 2.0 for cy in centres_axis)
+                x_edge = x + (1.0 if side == "E" else -1.0) * (seat_l / 2.0 + radial_out)
+                if abs(x_edge) > dish_half_l + 1e-6:
+                    raise ValueError(f"Symmetric U-clips on opening {idx} exceed dish length.")
+                if y_extent > dish_half_w + 1e-6:
+                    raise ValueError(f"Symmetric U-clips on opening {idx} exceed dish width.")
+
+
+def create_document():
+    """v38: show only the dish, with all symmetric fused U-clips and bolt holes."""
+    validate_parameters()
+    doc = App.newDocument("PET_Plant_Dish_Only_V38")
+    dish_shape = make_dish()
+    add_feature(doc, "Dish_Only_With_Symmetric_Acrylic_U_Clips", dish_shape,
+                color=(0.35, 0.55, 0.95), transparency=20)
+
+    App.Console.PrintMessage("Created dish-only v38 with symmetric fused acrylic U-clips around selected openings.\n")
+    App.Console.PrintMessage(
+        f"Openings: {symmetric_acrylic_u_clip_indices()}; sides: {symmetric_acrylic_u_clip_sides()}\n"
+    )
+    App.Console.PrintMessage(
+        f"U-clip length: {simple_acrylic_u_clip_length():.2f} mm; "
+        f"inner gap: {simple_acrylic_u_inner_gap():.2f} mm; "
+        f"wall: {simple_acrylic_u_wall_thickness():.2f} mm; "
+        f"height: {simple_acrylic_u_height():.2f} mm\n"
+    )
+    if simple_acrylic_u_bolt_holes_enabled():
+        App.Console.PrintMessage(
+            f"Bolt hole diameter: {simple_acrylic_u_bolt_hole_diameter():.2f} mm; "
+            f"height above dish: {simple_acrylic_u_bolt_hole_height_above_dish():.2f} mm\n"
+        )
+
+    doc.recompute()
+    if Gui is not None:
+        Gui.ActiveDocument.ActiveView.viewAxonometric()
+        Gui.SendMsgToActiveView("ViewFit")
+    maybe_export(doc)
+    return doc
+
+
+# -----------------------------------------------------------------------------
+# Revision v39 overrides — share U-clips in the internal strips between openings
+# -----------------------------------------------------------------------------
+# Correction to v38:
+#   - External sides still use the requested symmetric U clips.
+#   - Where two neighbouring dish openings share the same central strip/rib,
+#     only ONE shared pair of U clips is generated in that strip.
+#   - This avoids the crowded four-clip duplication between openings.
+#   - The shared U clips use the same dimensions and bolt-hole parameters.
+#   - Only the dish is shown.
+
+# Keep this visible/overridable even if the pasted parameter block did not include it.
+if not hasattr(P, "symmetric_acrylic_u_clip_share_internal_sides"):
+    P.symmetric_acrylic_u_clip_share_internal_sides = True
+if not hasattr(P, "symmetric_acrylic_u_clip_internal_side_count"):
+    P.symmetric_acrylic_u_clip_internal_side_count = 2
+
+
+def symmetric_acrylic_u_clip_share_internal_sides():
+    return bool(getattr(P, "symmetric_acrylic_u_clip_share_internal_sides", True))
+
+
+def symmetric_acrylic_u_clip_internal_side_count():
+    return max(1, int(getattr(P, "symmetric_acrylic_u_clip_internal_side_count", 2)))
+
+
+# Neighbour map for the 2 x 2 dish opening order:
+#   3  4
+#   1  2
+_INTERNAL_NEIGHBOUR_FOR_SIDE = {
+    (1, "E"): 2, (2, "W"): 1,
+    (3, "E"): 4, (4, "W"): 3,
+    (1, "N"): 3, (3, "S"): 1,
+    (2, "N"): 4, (4, "S"): 2,
+}
+
+
+def _symmetric_shared_u_axis_centres(axis_center, span, orientation):
+    """Centres for the two shared U clips between neighbouring openings."""
+    orientation = str(orientation).upper()
+    manual = symmetric_u_manual_offset_for_side("N" if orientation == "X" else "E")
+    return _symmetric_u_axis_centres(
+        axis_center,
+        span,
+        symmetric_acrylic_u_clip_internal_side_count(),
+        simple_acrylic_u_clip_length(),
+        manual,
+    )
+
+
+def symmetric_acrylic_u_clip_shapes_for_shared_line(x_center, y_center, orientation):
+    """Return (dish_cutters, solids, bolt_cutters) for a shared internal strip.
+
+    orientation="X" means the clip length runs along X, with acrylic thickness in Y.
+    orientation="Y" means the clip length runs along Y, with acrylic thickness in X.
+    The U channel is centred on the middle of the strip between two adjacent openings.
+    """
+    orientation = str(orientation).strip().upper()
+    p = _u_wall_and_bolt_common()
+    clip_len = p["clip_len"]
+    gap = p["gap"]
+    wall = p["wall"]
+    groove_depth = p["groove_depth"]
+
+    dish_cutters = []
+    solids = []
+    bolt_cutters = []
+
+    if orientation == "X":
+        # Shared strip between lower/upper openings. Clips run along X.
+        centres = _symmetric_shared_u_axis_centres(x_center, simple_acrylic_u_seat_length(), "X")
+        wall_offset = gap / 2.0 + wall / 2.0
+        wall_y_a = y_center - wall_offset
+        wall_y_b = y_center + wall_offset
+        slot_y = y_center
+
+        for cx in centres:
+            if groove_depth > 0:
+                dish_cutters.append(box_centered(
+                    clip_len, gap, groove_depth + 0.08, p["groove_z"], cx, slot_y
+                ))
+            solids.append(box_centered(clip_len, wall, p["wall_h"], p["wall_z"], cx, wall_y_a))
+            solids.append(box_centered(clip_len, wall, p["wall_h"], p["wall_z"], cx, wall_y_b))
+            if simple_acrylic_u_bolt_holes_enabled():
+                bolt_cutters.append(cylinder_y(
+                    p["bolt_d"], p["bolt_len"], p["bolt_z"],
+                    cx + p["bolt_axis_offset"], slot_y
+                ))
+        return dish_cutters, solids, bolt_cutters
+
+    if orientation == "Y":
+        # Shared strip between left/right openings. Clips run along Y.
+        centres = _symmetric_shared_u_axis_centres(y_center, simple_acrylic_u_seat_width(), "Y")
+        wall_offset = gap / 2.0 + wall / 2.0
+        wall_x_a = x_center - wall_offset
+        wall_x_b = x_center + wall_offset
+        slot_x = x_center
+
+        for cy in centres:
+            if groove_depth > 0:
+                dish_cutters.append(box_centered(
+                    gap, clip_len, groove_depth + 0.08, p["groove_z"], slot_x, cy
+                ))
+            solids.append(box_centered(wall, clip_len, p["wall_h"], p["wall_z"], wall_x_a, cy))
+            solids.append(box_centered(wall, clip_len, p["wall_h"], p["wall_z"], wall_x_b, cy))
+            if simple_acrylic_u_bolt_holes_enabled():
+                bolt_cutters.append(cylinder_x(
+                    p["bolt_d"], p["bolt_len"], p["bolt_z"],
+                    slot_x, cy + p["bolt_axis_offset"]
+                ))
+        return dish_cutters, solids, bolt_cutters
+
+    return dish_cutters, solids, bolt_cutters
+
+
+def _add_shared_internal_u_clip_pair(idx, neighbour, centres, dish_cutters, solids, bolt_cutters):
+    """Add one shared U-clip pair between two adjacent openings."""
+    x1, y1 = centres[idx - 1]
+    x2, y2 = centres[neighbour - 1]
+    x_mid = (x1 + x2) / 2.0
+    y_mid = (y1 + y2) / 2.0
+
+    # Different X -> left/right neighbours; shared line runs along Y.
+    if abs(x1 - x2) > abs(y1 - y2):
+        c, s, b = symmetric_acrylic_u_clip_shapes_for_shared_line(x_mid, y_mid, "Y")
+    else:
+        # Different Y -> lower/upper neighbours; shared line runs along X.
+        c, s, b = symmetric_acrylic_u_clip_shapes_for_shared_line(x_mid, y_mid, "X")
+
+    dish_cutters.extend(c)
+    solids.extend(s)
+    bolt_cutters.extend(b)
+
+
+def symmetric_acrylic_u_clip_all_shapes():
+    """v39: generate external sides normally but internal shared strips only once."""
+    dish_cutters = []
+    solids = []
+    bolt_cutters = []
+    centres = opening_centres()
+    selected = set(symmetric_acrylic_u_clip_indices())
+    sides = symmetric_acrylic_u_clip_sides()
+    seen_shared_pairs = set()
+
+    for idx in symmetric_acrylic_u_clip_indices():
+        x, y = centres[idx - 1]
+        for side in sides:
+            side = str(side).upper()
+            neighbour = _INTERNAL_NEIGHBOUR_FOR_SIDE.get((idx, side))
+
+            if (symmetric_acrylic_u_clip_share_internal_sides()
+                    and neighbour in selected):
+                pair_key = tuple(sorted((idx, neighbour)))
+                if pair_key not in seen_shared_pairs:
+                    seen_shared_pairs.add(pair_key)
+                    _add_shared_internal_u_clip_pair(idx, neighbour, centres,
+                                                     dish_cutters, solids, bolt_cutters)
+                # Do not also add the duplicate opening-specific side.
+                continue
+
+            # Outside/perimeter side, or no matching selected neighbour.
+            c, s, b = symmetric_acrylic_u_clip_shapes_for_side(x, y, side)
+            dish_cutters.extend(c)
+            solids.extend(s)
+            bolt_cutters.extend(b)
+
+    return dish_cutters, solids, bolt_cutters
+
+
+# Reuse the v38 geometry builder; it calls symmetric_acrylic_u_clip_all_shapes(),
+# which is now overridden above.
+_make_dish_v39_base = make_dish
+_validate_parameters_v38 = validate_parameters
+
+
+def validate_parameters():
+    """v39 validation: same dimensional checks, with shared internal clips enabled."""
+    # The v38 validation checks the U dimensions, bolt holes, and outer footprint.
+    # It may be slightly conservative because v39 removes duplicate internal clips,
+    # which is safe for this layout.
+    _validate_parameters_v38()
+
+
+def create_document():
+    """v39: show only the dish, with shared internal U-clip pairs."""
+    validate_parameters()
+    doc = App.newDocument("PET_Plant_Dish_Only_V39")
+    dish_shape = make_dish()
+    add_feature(doc, "Dish_Only_With_Shared_Internal_Acrylic_U_Clips", dish_shape,
+                color=(0.35, 0.55, 0.95), transparency=20)
+
+    App.Console.PrintMessage("Created dish-only v39 with shared internal acrylic U-clips.\n")
+    App.Console.PrintMessage(
+        f"Openings: {symmetric_acrylic_u_clip_indices()}; sides: {symmetric_acrylic_u_clip_sides()}\n"
+    )
+    App.Console.PrintMessage(
+        f"Internal strips shared: {symmetric_acrylic_u_clip_share_internal_sides()}; "
+        f"clips per internal strip: {symmetric_acrylic_u_clip_internal_side_count()}\n"
+    )
+    App.Console.PrintMessage(
+        f"U-clip length: {simple_acrylic_u_clip_length():.2f} mm; "
+        f"inner gap: {simple_acrylic_u_inner_gap():.2f} mm; "
+        f"wall: {simple_acrylic_u_wall_thickness():.2f} mm; "
+        f"height: {simple_acrylic_u_height():.2f} mm\n"
+    )
+    if simple_acrylic_u_bolt_holes_enabled():
+        App.Console.PrintMessage(
+            f"Bolt hole diameter: {simple_acrylic_u_bolt_hole_diameter():.2f} mm; "
+            f"height above dish: {simple_acrylic_u_bolt_hole_height_above_dish():.2f} mm\n"
+        )
+
+    doc.recompute()
+    if Gui is not None:
+        Gui.ActiveDocument.ActiveView.viewAxonometric()
+        Gui.SendMsgToActiveView("ViewFit")
+    maybe_export(doc)
+    return doc
 
 
 if __name__ == "__main__":
